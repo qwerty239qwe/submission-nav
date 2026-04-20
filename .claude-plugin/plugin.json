@@ -1,0 +1,7 @@
+{
+  "name": "submission-navigator",
+  "version": "0.1.0",
+  "description": "AI submission strategist: analyze manuscript, rank venues, summarize rules, check formatting, draft revisions.",
+  "author": {"name": "qwerty239qwe"},
+  "keywords": ["academic", "publishing", "manuscript", "journal"]
+}
