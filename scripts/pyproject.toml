@@ -1,0 +1,42 @@
+[project]
+name = "sn-lib"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = [
+  "pymupdf>=1.24",
+  "python-docx>=1.1",
+  "pytesseract>=0.3.10",
+  "Pillow>=10.0",
+  "httpx>=0.27",
+  "pydantic>=2.6",
+  "rapidfuzz>=3.6",
+  "numpy>=1.26",
+  "platformdirs>=4.2",
+]
+
+[dependency-groups]
+dev = [
+  "pytest>=8",
+  "respx>=0.21",
+  "pytest-asyncio>=0.23",
+  "ty>=0.0.1a5",
+]
+
+[tool.uv]
+package = true
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["sn_lib"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ty.src]
+include = ["sn_lib"]
+
+[tool.ty.rules]
+unresolved-import = "warn"
