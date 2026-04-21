@@ -26,10 +26,12 @@ class CheckResult:
 
 def extract_figures_from_pdf(pdf_path: str | Path) -> list[FigureInfo]:
     import fitz
-    doc = fitz.open(str(pdf_path))
+    from typing import Any
+    doc: Any = fitz.open(str(pdf_path))
     out: list[FigureInfo] = []
     idx = 0
-    for pno, page in enumerate(doc, start=1):
+    for pno in range(doc.page_count):
+        page: Any = doc.load_page(pno)
         for img in page.get_images(full=True):
             xref = img[0]
             info = doc.extract_image(xref)
@@ -43,7 +45,7 @@ def extract_figures_from_pdf(pdf_path: str | Path) -> list[FigureInfo]:
                 rw_in = rect.width / 72.0
                 if rw_in > 0:
                     dpi = int(w / rw_in)
-            out.append(FigureInfo(idx, dpi, ext, w, h, pno))
+            out.append(FigureInfo(idx, dpi, ext, w, h, pno + 1))
     return out
 
 def check_against_rules(figures: list[FigureInfo], rules: JournalRules, word_count: int) -> CheckResult:
