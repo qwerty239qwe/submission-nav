@@ -6,3 +6,5 @@ __pycache__/
 .submission-navigator-cache/
 # uv / ty
 .ty_cache/
+docs/
+temp_sn/
