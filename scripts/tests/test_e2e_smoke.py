@@ -26,6 +26,22 @@ def test_end_to_end_strategy(tmp_path, tmp_config_dir):
              "x_concepts": [{"display_name": "Astronomy", "score": 0.9}]},
         ]})
     )
+    respx.get("https://api.openalex.org/works").mock(
+        return_value=httpx.Response(200, json={"results": [
+            {
+                "primary_location": {
+                    "source": {
+                        "id": "A",
+                        "display_name": "J Widget",
+                        "issn_l": "1",
+                        "is_oa": True,
+                        "host_organization_name": "X",
+                    }
+                },
+                "primary_topic": {"display_name": "Widget optimization"},
+            }
+        ]})
+    )
     venues = search_venues(ms.abstract or ms.title, per_page=10)
     ranked = rank_venues(["widget optimization", "gradient methods"], venues)
     assert ranked[0].venue.name == "J Widget"

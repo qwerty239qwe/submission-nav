@@ -26,3 +26,10 @@ def test_apc_penalty_when_budget_set():
     v2 = _v("Pricey", ["x"], 3.0, oa=True, apc=5000)
     ranked = rank_venues(["x"], [v1, v2], apc_budget_usd=1000)
     assert ranked[0].venue.name == "Free"
+
+
+def test_title_fallback_when_concepts_missing():
+    v1 = _v("Computational Toxicology", [], 2.0)
+    v2 = _v("Journal of Botany", [], 2.0)
+    ranked = rank_venues(["computational toxicology"], [v2, v1])
+    assert ranked[0].venue.name == "Computational Toxicology"
