@@ -1,7 +1,9 @@
 from __future__ import annotations
 import httpx
 import os
+import time
 from dataclasses import dataclass, asdict
+from rapidfuzz import fuzz
 from .cli import emit_json
 from .config import Config
 from .cache import HttpCache
@@ -9,8 +11,15 @@ from .cache import HttpCache
 OPENALEX_SOURCES = "https://api.openalex.org/sources"
 OPENALEX_WORKS = "https://api.openalex.org/works"
 CROSSREF_JOURNALS = "https://api.crossref.org/journals"
+DBLP_VENUES = "https://dblp.org/search/venue/api"
 DOAJ_JOURNALS = "https://doaj.org/api/search/journals"
-SCOPUS_SERIAL_TITLE = "https://api.elsevier.com/content/serial/title/issn"
+SCOPUS_SERIAL_TITLE = "https://api.elsevier.com/content/serial/title"
+ELSEVIER_SERIAL_TITLE_FIELDS = "dc:title,prism:publicationName,SJR,SNIP"
+ELSEVIER_REQUESTS_PER_SECOND = 6
+ELSEVIER_MIN_INTERVAL_SECONDS = 1.0 / ELSEVIER_REQUESTS_PER_SECOND
+ELSEVIER_ENRICH_TOP_N = 10
+DBLP_ENRICH_TOP_N = 20
+_last_elsevier_request_ts = 0.0
 
 @dataclass
 class VenueHit:
@@ -24,7 +33,11 @@ class VenueHit:
     h_index: int | None
     concepts: list[str]
     source: str
+    venue_type: str | None = None
     evidence_count: int = 0
+    dblp_acronym: str | None = None
+    dblp_url: str | None = None
+    dblp_type: str | None = None
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -44,8 +57,25 @@ def _get(url: str, params: dict, headers: dict | None = None) -> dict:
     cache.set(url, params, data)
     return data
 
-def search_openalex(query: str, per_page: int = 25) -> list[VenueHit]:
-    params = {"search": query, "per-page": per_page, "filter": "type:journal"}
+
+def _type_filter(venue_types: tuple[str, ...]) -> str:
+    filtered = [t for t in venue_types if t]
+    if not filtered:
+        filtered = ["journal"]
+    return "|".join(filtered)
+
+
+def _throttle_elsevier() -> None:
+    global _last_elsevier_request_ts
+    now = time.monotonic()
+    wait = ELSEVIER_MIN_INTERVAL_SECONDS - (now - _last_elsevier_request_ts)
+    if wait > 0:
+        time.sleep(wait)
+        now = time.monotonic()
+    _last_elsevier_request_ts = now
+
+def search_openalex(query: str, per_page: int = 25, venue_types: tuple[str, ...] = ("journal",)) -> list[VenueHit]:
+    params = {"search": query, "per-page": per_page, "filter": f"type:{_type_filter(venue_types)}"}
     openalex_mailto = os.getenv("OPENALEX_EMAIL") or os.getenv("OPENALEX_MAILTO")
     if openalex_mailto:
         params["mailto"] = openalex_mailto
@@ -58,6 +88,7 @@ def search_openalex(query: str, per_page: int = 25) -> list[VenueHit]:
             name=r.get("display_name", ""),
             issn=r.get("issn_l"),
             publisher=r.get("host_organization_name"),
+            venue_type=r.get("type") or "journal",
             is_oa=r.get("is_oa"),
             apc_usd=r.get("apc_usd"),
             impact_proxy=stats.get("2yr_mean_citedness"),
@@ -78,17 +109,19 @@ def _nested_get(data: dict, *path):
     return cur
 
 
-def search_openalex_by_works(query: str, per_page: int = 50) -> list[VenueHit]:
+def search_openalex_by_works(query: str, per_page: int = 50, venue_types: tuple[str, ...] = ("journal",)) -> list[VenueHit]:
     params = {
         "search": query,
-        "filter": "primary_location.source.type:journal,type:article",
-        "sort": "-relevance_score",
+        "filter": f"primary_location.source.type:{_type_filter(venue_types)}",
         "per-page": min(per_page, 200),
     }
     openalex_mailto = os.getenv("OPENALEX_EMAIL") or os.getenv("OPENALEX_MAILTO")
     if openalex_mailto:
         params["mailto"] = openalex_mailto
-    data = _get(OPENALEX_WORKS, params)
+    try:
+        data = _get(OPENALEX_WORKS, params)
+    except httpx.HTTPStatusError:
+        return []
     grouped: dict[str, dict] = {}
     for work in data.get("results", []):
         source = _nested_get(work, "primary_location", "source") or {}
@@ -100,6 +133,7 @@ def search_openalex_by_works(query: str, per_page: int = 50) -> list[VenueHit]:
             "name": source.get("display_name", ""),
             "issn": source.get("issn_l"),
             "publisher": source.get("host_organization_name"),
+            "venue_type": source.get("type") or "journal",
             "is_oa": source.get("is_oa"),
             "apc_usd": None,
             "impact_proxy": None,
@@ -126,6 +160,7 @@ def search_openalex_by_works(query: str, per_page: int = 50) -> list[VenueHit]:
             ("name", source.get("display_name", "")),
             ("issn", source.get("issn_l")),
             ("publisher", source.get("host_organization_name")),
+            ("venue_type", source.get("type") or "journal"),
             ("is_oa", source.get("is_oa")),
         ):
             if not row[key] and fallback:
@@ -146,10 +181,14 @@ def _merge_hits(primary: list[VenueHit], secondary: list[VenueHit]) -> list[Venu
         existing.name = existing.name or hit.name
         existing.issn = existing.issn or hit.issn
         existing.publisher = existing.publisher or hit.publisher
+        existing.venue_type = existing.venue_type or hit.venue_type
         existing.is_oa = existing.is_oa if existing.is_oa is not None else hit.is_oa
         existing.apc_usd = existing.apc_usd if existing.apc_usd is not None else hit.apc_usd
         existing.impact_proxy = existing.impact_proxy if existing.impact_proxy is not None else hit.impact_proxy
         existing.h_index = existing.h_index if existing.h_index is not None else hit.h_index
+        existing.dblp_acronym = existing.dblp_acronym or hit.dblp_acronym
+        existing.dblp_url = existing.dblp_url or hit.dblp_url
+        existing.dblp_type = existing.dblp_type or hit.dblp_type
         for concept in hit.concepts:
             if concept and concept not in existing.concepts:
                 existing.concepts.append(concept)
@@ -173,7 +212,20 @@ def enrich_scopus(issn: str) -> dict | None:
         "X-ELS-APIKey": scopus_key,
         "Accept": "application/json",
     }
-    return _get(f"{SCOPUS_SERIAL_TITLE}/{issn}", {"view": "STANDARD"}, headers=headers)
+    params = {
+        "issn": issn,
+        "view": "STANDARD",
+        "field": ELSEVIER_SERIAL_TITLE_FIELDS,
+    }
+    # Respect local Elsevier usage rules: one metadata request per ISSN, rate-limited,
+    # and only for top-ranked candidates in search_venues.
+    _throttle_elsevier()
+    try:
+        return _get(SCOPUS_SERIAL_TITLE, params, headers=headers)
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code in {400, 401, 403, 404, 429}:
+            return None
+        raise
 
 def _latest_metric(value) -> float | None:
     if value is None:
@@ -230,12 +282,103 @@ def enrich_doaj(issn: str) -> dict | None:
     results = data.get("results") or []
     return results[0] if results else None
 
-def search_venues(query: str, per_page: int = 25) -> list[VenueHit]:
-    hits = _merge_hits(
-        search_openalex(query, per_page=per_page),
-        search_openalex_by_works(query, per_page=max(50, per_page)),
+
+def enrich_crossref(issn: str) -> dict | None:
+    if not issn:
+        return None
+    params: dict[str, str] = {}
+    crossref_email = os.getenv("CROSSREF_EMAIL")
+    if crossref_email:
+        params["mailto"] = crossref_email
+    try:
+        data = _get(f"{CROSSREF_JOURNALS}/{issn}", params)
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code in {400, 404, 429}:
+            return None
+        raise
+    return data.get("message") or data
+
+
+def _apply_crossref(hit: VenueHit, payload: dict) -> None:
+    if not payload:
+        return
+    title = payload.get("title")
+    if not hit.name and title:
+        hit.name = title
+    publisher = payload.get("publisher")
+    if not hit.publisher and publisher:
+        hit.publisher = publisher
+    if not hit.issn:
+        issns = payload.get("ISSN") or []
+        if issns:
+            hit.issn = issns[0]
+    if "crossref" not in hit.source.split("+"):
+        hit.source = f"{hit.source}+crossref"
+
+
+def search_dblp_venues(query: str, max_hits: int = 5) -> list[dict]:
+    params = {"q": query, "format": "json", "h": max_hits, "c": 0}
+    try:
+        data = _get(DBLP_VENUES, params)
+    except httpx.HTTPError:
+        return []
+    hits = data.get("result", {}).get("hits", {}).get("hit") or []
+    if isinstance(hits, dict):
+        hits = [hits]
+    out: list[dict] = []
+    for hit in hits:
+        info = hit.get("info") or {}
+        venue = info.get("venue")
+        if not venue:
+            continue
+        out.append({
+            "venue": venue,
+            "acronym": info.get("acronym"),
+            "type": info.get("type"),
+            "url": info.get("url"),
+        })
+    return out
+
+
+def _apply_dblp(hit: VenueHit, payload: dict) -> None:
+    hit.dblp_acronym = hit.dblp_acronym or payload.get("acronym")
+    hit.dblp_url = hit.dblp_url or payload.get("url")
+    hit.dblp_type = hit.dblp_type or payload.get("type")
+    dblp_name = payload.get("venue")
+    if dblp_name and (not hit.name or len(dblp_name) < len(hit.name)):
+        hit.name = dblp_name
+    if "dblp" not in hit.source.split("+"):
+        hit.source = f"{hit.source}+dblp"
+
+
+def enrich_dblp(hit: VenueHit) -> dict | None:
+    if hit.venue_type != "conference" or not hit.name:
+        return None
+    candidates = search_dblp_venues(hit.name, max_hits=5)
+    if not candidates:
+        return None
+    best = max(
+        candidates,
+        key=lambda item: max(
+            fuzz.token_set_ratio(hit.name, item.get("venue") or ""),
+            fuzz.token_set_ratio(hit.name, item.get("acronym") or ""),
+        ),
     )
-    for h in hits:
+    score = max(
+        fuzz.token_set_ratio(hit.name, best.get("venue") or ""),
+        fuzz.token_set_ratio(hit.name, best.get("acronym") or ""),
+    )
+    return best if score >= 72 else None
+
+
+def search_venues(query: str, per_page: int = 25, venue_types: tuple[str, ...] = ("journal",)) -> list[VenueHit]:
+    hits = _merge_hits(
+        search_openalex_by_works(query, per_page=max(50, per_page), venue_types=venue_types),
+        search_openalex(query, per_page=per_page, venue_types=venue_types),
+    )
+    for idx, h in enumerate(hits):
+        if idx >= ELSEVIER_ENRICH_TOP_N:
+            break
         if h.issn:
             scopus = enrich_scopus(h.issn)
             if scopus:
@@ -253,6 +396,17 @@ def search_venues(query: str, per_page: int = 25) -> list[VenueHit]:
                 apc = (bib.get("apc") or {}).get("max") or []
                 if apc:
                     h.apc_usd = apc[0].get("price")
+        if h.issn and (not h.name or not h.publisher or "crossref" not in h.source.split("+")):
+            crossref = enrich_crossref(h.issn)
+            if crossref:
+                _apply_crossref(h, crossref)
+    for idx, h in enumerate(hits):
+        if idx >= DBLP_ENRICH_TOP_N:
+            break
+        if h.venue_type == "conference":
+            dblp = enrich_dblp(h)
+            if dblp:
+                _apply_dblp(h, dblp)
     return hits
 
 def _main():
@@ -260,9 +414,10 @@ def _main():
     ap = argparse.ArgumentParser()
     ap.add_argument("query")
     ap.add_argument("--per-page", type=int, default=25)
+    ap.add_argument("--venue-types", nargs="+", default=["journal"], help="Venue types to search, e.g. journal conference.")
     ap.add_argument("--out", help="Optional path to write JSON output.")
     args = ap.parse_args()
-    hits = search_venues(args.query, per_page=args.per_page)
+    hits = search_venues(args.query, per_page=args.per_page, venue_types=tuple(args.venue_types))
     emit_json([h.to_dict() for h in hits], args.out)
 
 if __name__ == "__main__":
