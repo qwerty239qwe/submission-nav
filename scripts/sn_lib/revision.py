@@ -14,9 +14,20 @@ def parse_reviewer_comments(text: str) -> list[dict]:
         blocks.append((rev, text[pos:end]))
     items: list[dict] = []
     for rev, blk in blocks:
-        for i, m in enumerate(_ITEM.finditer(blk), start=1):
+        block_items = list(_ITEM.finditer(blk))
+        for i, m in enumerate(block_items, start=1):
             idx = int(m.group(1)) if m.group(1) else i
             items.append({"reviewer": rev, "idx": idx, "comment": m.group(2).strip()})
+        if block_items:
+            continue
+        paragraphs = []
+        for part in re.split(r"\n\s*\n+", blk):
+            lines = [line.strip() for line in part.splitlines()]
+            para = " ".join(line for line in lines if line and not _REVIEWER_HEAD.match(line))
+            if para:
+                paragraphs.append(para)
+        for i, para in enumerate(paragraphs, start=1):
+            items.append({"reviewer": rev, "idx": i, "comment": para})
     return items
 
 def build_response_skeleton(items: list[dict]) -> str:

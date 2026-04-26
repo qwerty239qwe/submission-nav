@@ -1,4 +1,5 @@
-from sn_lib.figures import check_against_rules, FigureInfo, CheckResult
+from types import SimpleNamespace
+from sn_lib.figures import _effective_dpi, check_against_rules, FigureInfo, CheckResult
 from sn_lib.rules import JournalRules
 
 def test_dpi_too_low_flags():
@@ -17,3 +18,7 @@ def test_no_rules_no_violations():
     rules = JournalRules(journal="J", source_url="")
     res = check_against_rules([], rules, word_count=1000)
     assert res.violations == []
+
+def test_effective_dpi_uses_lower_dimension():
+    rect = SimpleNamespace(width=144, height=360)
+    assert _effective_dpi(600, 600, rect) == 120

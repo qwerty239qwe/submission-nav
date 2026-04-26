@@ -24,6 +24,18 @@ class CheckResult:
     def to_dict(self) -> dict:
         return asdict(self)
 
+def _effective_dpi(width_px: int | None, height_px: int | None, rect) -> int | None:
+    if not rect or not width_px or not height_px:
+        return None
+    width_in = rect.width / 72.0
+    height_in = rect.height / 72.0
+    dpis: list[int] = []
+    if width_in > 0:
+        dpis.append(int(width_px / width_in))
+    if height_in > 0:
+        dpis.append(int(height_px / height_in))
+    return min(dpis) if dpis else None
+
 def extract_figures_from_pdf(pdf_path: str | Path) -> list[FigureInfo]:
     import fitz
     from typing import Any
@@ -38,13 +50,8 @@ def extract_figures_from_pdf(pdf_path: str | Path) -> list[FigureInfo]:
             idx += 1
             w = info.get("width"); h = info.get("height")
             ext = (info.get("ext") or "").upper()
-            dpi = None
             rect_list = page.get_image_rects(xref)
-            if rect_list and w and h:
-                rect = rect_list[0]
-                rw_in = rect.width / 72.0
-                if rw_in > 0:
-                    dpi = int(w / rw_in)
+            dpi = _effective_dpi(w, h, rect_list[0] if rect_list else None)
             out.append(FigureInfo(idx, dpi, ext, w, h, pno + 1))
     return out
 
