@@ -22,9 +22,42 @@ class Manuscript:
     def to_dict(self) -> dict:
         return {**asdict(self), "sections": [asdict(s) for s in self.sections]}
 
+    def to_summary_dict(self, max_heading_count: int = 12) -> dict:
+        headings = [s.heading for s in self.sections if s.heading][:max_heading_count]
+        return {
+            "title": self.title,
+            "authors": self.authors,
+            "abstract": self.abstract,
+            "section_headings": headings,
+            "word_count": self.word_count,
+            "reference_count": self.reference_count,
+            "source_path": self.source_path,
+        }
+
 HEADING_NUMBER_RE = re.compile(r"^\s*\d+(?:\.\d+)*\.?\s*")
 REF_LINE_RE = re.compile(r"(?m)^\s*(?:\[\d+\]|\d+\.)\s+")
 REF_BRACKET_RE = re.compile(r"\[\d+\]")
+GENERIC_PDF_LABELS = {
+    "research article",
+    "article",
+    "article in press",
+    "open access",
+    "body",
+    "methodology",
+    "reviewed preprint",
+    "not revised",
+}
+JOURNAL_LINE_RE = re.compile(r"^(plos|bmc|elife|peerj|scientific reports|journal of|nature|frontiers|cell|the lancet)\b", re.I)
+AUTHOR_LINE_RE = re.compile(
+    r"(?:\b[a-z]+,\s*){1,}[a-z]+|\bet al\.?\b|\borcid\b|@|affiliat|department|university|institute|\bgoecksj@|roles\b",
+    re.I,
+)
+TITLE_STOP_RE = re.compile(r"^(abstract|introduction|background|results|methods|references)\b", re.I)
+PDF_METADATA_RE = re.compile(
+    r"^(type|published|doi|received|accepted|submitted|edited by|reviewed by|correspondence|for correspondence|"
+    r"competing interests|funding|reviewing editor|cite this article|from the)\b|@|https?://",
+    re.I,
+)
 KNOWN_HEADINGS = (
     "abstract",
     "introduction",
@@ -40,6 +73,20 @@ KNOWN_HEADINGS = (
     "acknowledgements",
     "acknowledgment",
     "acknowledgments",
+)
+ABSTRACT_TRIM_MARKERS = (
+    "author summary",
+    "citation:",
+    "editor:",
+    "received:",
+    "accepted:",
+    "published:",
+    "copyright:",
+    "data availability statement:",
+    "funding:",
+    "plos genetics",
+    "plos one",
+    "plos computational biology",
 )
 
 def _is_heading_style(style: str) -> bool:
@@ -72,6 +119,117 @@ def _count_references(text: str) -> int:
     if numbered:
         return len(numbered)
     return len(re.findall(r"\b10\.\d{4,9}/\S+\b", text))
+
+
+def _clean_abstract_text(text: str | None) -> str | None:
+    if not text:
+        return text
+    lowered = text.lower()
+    cut = len(text)
+    for marker in ABSTRACT_TRIM_MARKERS:
+        idx = lowered.find(marker)
+        if idx != -1:
+            cut = min(cut, idx)
+    cleaned = text[:cut].strip()
+    return cleaned or text.strip()
+
+
+def _clean_pdf_line(text: str) -> str:
+    return re.sub(r"\s+", " ", text.replace("\u00ad", "").strip())
+
+
+def _is_generic_pdf_label(text: str) -> bool:
+    t = _clean_pdf_line(text).lower()
+    if not t:
+        return True
+    if len(t) <= 2:
+        return True
+    if t in GENERIC_PDF_LABELS:
+        return True
+    if JOURNAL_LINE_RE.match(t):
+        return True
+    return False
+
+
+def _looks_like_author_line(text: str) -> bool:
+    t = _clean_pdf_line(text)
+    if not t:
+        return False
+    if TITLE_STOP_RE.match(t):
+        return True
+    if AUTHOR_LINE_RE.search(t):
+        return True
+    if re.search(r"\d", t) and len(t.split()) > 3:
+        return True
+    return False
+
+
+def _pick_pdf_title_and_authors(lines: list[str]) -> tuple[str, list[str]]:
+    cleaned = [_clean_pdf_line(line) for line in lines if _clean_pdf_line(line)]
+    if not cleaned:
+        return "", []
+
+    start = 0
+    while start < len(cleaned) and _is_generic_pdf_label(cleaned[start]):
+        start += 1
+
+    title_parts: list[str] = []
+    idx = start
+    while idx < len(cleaned):
+        line = cleaned[idx]
+        if _is_generic_pdf_label(line):
+            idx += 1
+            continue
+        if _looks_like_author_line(line) and title_parts:
+            break
+        if TITLE_STOP_RE.match(line):
+            break
+        title_parts.append(line)
+        idx += 1
+        if len(title_parts) >= 4:
+            break
+
+    title = " ".join(title_parts).strip()
+    authors: list[str] = []
+    while idx < len(cleaned):
+        line = cleaned[idx]
+        if TITLE_STOP_RE.match(line):
+            break
+        if _is_generic_pdf_label(line):
+            idx += 1
+            continue
+        if re.search(r"affiliat|department|university|institute|received:|published:|doi", line, re.I):
+            break
+        authors.append(line)
+        idx += 1
+        if len(authors) >= 3:
+            break
+    return title or (cleaned[0] if cleaned else ""), authors
+
+
+def _pick_pdf_title_from_layout(rows: list[tuple[float, float, str]]) -> str:
+    candidates: list[tuple[float, float, str]] = []
+    for y, size, text in rows:
+        clean = _clean_pdf_line(text)
+        if not clean:
+            continue
+        if y > 360 or size < 15:
+            continue
+        if _is_generic_pdf_label(clean) or PDF_METADATA_RE.search(clean):
+            continue
+        if TITLE_STOP_RE.match(clean):
+            continue
+        candidates.append((y, size, clean))
+    if not candidates:
+        return ""
+
+    largest = max(size for _, size, _ in candidates)
+    title_rows = [(y, size, text) for y, size, text in candidates if size >= largest - 2.5]
+    title_rows.sort(key=lambda row: row[0])
+    title = _clean_pdf_line(" ".join(text for _, _, text in title_rows))
+    if len(title.split()) >= 3:
+        return title
+    return ""
 
 def _looks_like_title(style: str, text: str) -> bool:
     t = text.strip()
@@ -129,6 +287,7 @@ def _parse_docx(path: Path) -> Manuscript:
     authors = [a.strip() for a in re.split(r",| and ", authors_line) if a.strip()] if authors_line else []
     sections = _split_headings(paras)
     abstract = next((s.text for s in sections if _is_abstract_heading(s.heading)), None)
+    abstract = _clean_abstract_text(abstract)
     refs_section = next((s for s in sections if _is_reference_heading(s.heading)), None)
     ref_count = _count_references(refs_section.text) if refs_section else 0
     all_text = " ".join(s.text for s in sections)
@@ -144,9 +303,24 @@ def _parse_pdf(path: Path) -> Manuscript:
         from .ocr import ocr_pdf
         full = ocr_pdf(path)
     lines = [l for l in full.splitlines() if l.strip()]
-    title = lines[0] if lines else ""
-    authors_line = lines[1] if len(lines) > 1 else ""
-    authors = [a.strip() for a in re.split(r",| and ", authors_line) if a.strip() and len(a.strip()) < 60]
+    first_page_lines = [l for l in pages[0].splitlines() if l.strip()] if pages else lines
+    title, authors = _pick_pdf_title_and_authors(first_page_lines)
+    if pages:
+        layout_rows: list[tuple[float, float, str]] = []
+        for block in doc[0].get_text("dict").get("blocks", []):
+            for line in block.get("lines", []):
+                text = " ".join(span.get("text", "").strip() for span in line.get("spans", []) if span.get("text", "").strip())
+                if not text:
+                    continue
+                size = max((span.get("size", 0.0) for span in line.get("spans", [])), default=0.0)
+                y = line.get("bbox", [0.0, 0.0, 0.0, 0.0])[1]
+                layout_rows.append((float(y), float(size), text))
+        layout_title = _pick_pdf_title_from_layout(layout_rows)
+        if layout_title:
+            title = layout_title
+    if not authors and len(lines) > 1:
+        authors_line = lines[1]
+        authors = [a.strip() for a in re.split(r",| and ", authors_line) if a.strip() and len(a.strip()) < 60]
     blocks: list[tuple[str, str]] = []
     cur_head = "Body"
     cur_buf: list[str] = []
@@ -162,6 +336,7 @@ def _parse_pdf(path: Path) -> Manuscript:
         blocks.append((cur_head, "\n".join(cur_buf)))
     sections = [Section(h, t) for h, t in blocks]
     abstract = next((s.text for s in sections if _is_abstract_heading(s.heading)), None)
+    abstract = _clean_abstract_text(abstract)
     refs_section = next((s for s in sections if _is_reference_heading(s.heading)), None)
     ref_count = _count_references(refs_section.text) if refs_section else 0
     wc = len(full.split())
@@ -181,9 +356,12 @@ def _main():
     ap = argparse.ArgumentParser()
     ap.add_argument("path")
     ap.add_argument("--out", help="Optional path to write JSON output.")
+    ap.add_argument("--summary-out", help="Optional path to write a compact JSON summary.")
     args = ap.parse_args()
     m = parse_manuscript(args.path)
     emit_json(m.to_dict(), args.out)
+    if args.summary_out:
+        emit_json(m.to_summary_dict(), args.summary_out)
 
 if __name__ == "__main__":
     _main()

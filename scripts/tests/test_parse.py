@@ -1,6 +1,6 @@
 from pathlib import Path
 from docx import Document
-from sn_lib.parse import parse_manuscript, Manuscript
+from sn_lib.parse import parse_manuscript, Manuscript, _pick_pdf_title_and_authors, _pick_pdf_title_from_layout
 
 def _make_docx(path: Path):
     d = Document()
@@ -58,3 +58,62 @@ def test_parse_docx_handles_numbered_headings_and_numbered_references(tmp_path):
     assert any("Materials and Methods" in s.heading for s in m.sections)
     assert any("Results" in s.heading for s in m.sections)
     assert m.reference_count == 2
+
+
+def test_parse_summary_dict_is_compact(tmp_path):
+    p = tmp_path / "summary.docx"
+    _make_docx(p)
+    m = parse_manuscript(p)
+    summary = m.to_summary_dict()
+    assert summary["title"] == m.title
+    assert "section_headings" in summary
+    assert "sections" not in summary
+    assert summary["reference_count"] == m.reference_count
+
+
+def test_pick_pdf_title_and_authors_handles_plos_style_front_matter():
+    lines = [
+        "RESEARCH ARTICLE",
+        "Galaxy-ML: An accessible, reproducible, and",
+        "scalable machine learning toolkit for biomedicine",
+        "Qiang Gu1,2, Anup Kumar3, Simon Bray3",
+        "Department of Biomedical Engineering, Oregon Health & Science University",
+        "Abstract",
+    ]
+    title, authors = _pick_pdf_title_and_authors(lines)
+    assert title == "Galaxy-ML: An accessible, reproducible, and scalable machine learning toolkit for biomedicine"
+    assert authors == ["Qiang Gu1,2, Anup Kumar3, Simon Bray3"]
+
+
+def test_pick_pdf_title_from_layout_skips_journal_and_article_labels():
+    rows = [
+        (31.4, 25.0, "Scientific Reports"),
+        (48.9, 9.0, "https://doi.org/10.1038/example"),
+        (66.5, 21.0, "Article in Press"),
+        (114.5, 28.0, "Protium heptaphyllum, a tree native"),
+        (145.3, 28.0, "to the Atlantic Forest, is a potential source"),
+        (175.3, 28.0, "of compounds against important cocoa"),
+        (205.3, 28.0, "phytopathogen"),
+    ]
+    assert _pick_pdf_title_from_layout(rows) == (
+        "Protium heptaphyllum, a tree native to the Atlantic Forest, is a potential source "
+        "of compounds against important cocoa phytopathogen"
+    )
+
+
+def test_pick_pdf_title_from_layout_handles_interleaved_sidebar_metadata():
+    rows = [
+        (50.4, 7.0, "TYPE Original Research"),
+        (136.9, 21.0, "The protective effect of"),
+        (176.8, 7.0, "OPEN ACCESS"),
+        (186.9, 21.0, "probiotics on intestinal"),
+        (192.4, 5.5, "EDITED BY"),
+        (211.9, 21.0, "mucosal injury and dysbiosis"),
+        (236.9, 21.0, "in infants with congenital"),
+        (261.9, 21.0, "heart disease undergoing"),
+        (300.4, 11.0, "Zhixuan Zhang 1"),
+    ]
+    assert _pick_pdf_title_from_layout(rows) == (
+        "The protective effect of probiotics on intestinal mucosal injury and dysbiosis "
+        "in infants with congenital heart disease undergoing"
+    )
