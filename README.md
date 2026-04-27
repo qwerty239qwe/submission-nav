@@ -28,13 +28,21 @@ The skill is designed for practical decision support: it can suggest likely venu
 
 ### npx skills
 
-Install the self-contained toolkit skill:
+Install the self-contained toolkit skill.
+
+For Codex:
 
 ```bash
-npx skills add <repo-url> --skill submission-nav -a codex
+npx skills add https://github.com/qwerty239qwe/submission-nav --skill submission-nav -a codex
 ```
 
-For a local checkout:
+For Claude Code:
+
+```bash
+npx skills add https://github.com/qwerty239qwe/submission-nav --skill submission-nav -a claude-code
+```
+
+For a local checkout, replace the URL with `.` (and pass the same `-a` flag for your agent):
 
 ```bash
 npx skills add . --skill submission-nav -a codex
