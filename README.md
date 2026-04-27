@@ -18,6 +18,26 @@ It is designed to feel like a reusable agent capability first, with local helper
 
 ## Install
 
+### Recommended: npx skills
+
+Install the self-contained toolkit skill with:
+
+```bash
+npx skills add <repo-url> --skill submission-nav -a codex
+```
+
+For a local checkout:
+
+```bash
+npx skills add . --skill submission-nav -a codex
+```
+
+Use `--copy` if symlinks are inconvenient on your platform. For local-path installs, run from a clean checkout or remove local `temp_sn/` outputs first; installing from a Git URL only includes tracked project files.
+
+The repository also contains individual workflow skill files under `skills/`, but the recommended `npx skills add` target is the root `submission-nav` skill. It includes the bundled helper runtime under `scripts/`; installing only an individual workflow skill may omit those helpers.
+
+### Manual
+
 1. Place this repository where your agent host loads local skills or plugins.
 2. Run the one-time setup script:
    - Windows: [bin/install.ps1](bin/install.ps1)
