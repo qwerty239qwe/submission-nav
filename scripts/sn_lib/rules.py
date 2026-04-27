@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from html import unescape
 from dataclasses import asdict, dataclass, field
 
 import httpx
@@ -36,19 +37,66 @@ class JournalRules:
         return asdict(self)
 
 
-_WORD_LIMIT = re.compile(r"(?:not\s+exceed|max(?:imum)?|limit(?:ed)?\s+to|up\s+to)\s+(\d{3,5})\s+words", re.I)
-_ABSTRACT_LIMIT = re.compile(r"abstract[^.]{0,80}?(\d{2,4})\s+words", re.I)
-_DPI = re.compile(r"(\d{3,4})\s*dpi", re.I)
+_WORD_LIMIT_PATTERNS = (
+    re.compile(r"main text should be no more than ([\d,]{3,6}) words", re.I),
+    re.compile(r"manuscripts? (?:must|should) (?:not exceed|be no more than|be up to) ([\d,]{3,6}) words", re.I),
+    re.compile(r"article text (?:must|should) (?:not exceed|be no more than|be up to) ([\d,]{3,6}) words", re.I),
+)
+_NO_WORD_LIMIT = re.compile(r"(?:no restrictions on word count|manuscripts can be any length|do not impose strict limits on word count)", re.I)
+_ABSTRACT_LIMIT_PATTERNS = (
+    re.compile(r"abstract (?:should|must) (?:be )?(?:no more than|not exceed|up to) ([\d,]{2,4}) words", re.I),
+    re.compile(r"abstract[^.]{0,80}?(?:no more than|not exceed|up to) ([\d,]{2,4}) words", re.I),
+)
+_DPI = re.compile(r"([\d,]{3,5})\s*dpi", re.I)
 _FORMATS = re.compile(r"\b(TIFF?|EPS|PDF|PNG|JPE?G|SVG)\b", re.I)
-_REF_STYLE = re.compile(r"\b(vancouver|harvard|apa|chicago|ieee|ama)\b", re.I)
+_REF_STYLE = re.compile(r"\b(vancouver|harvard|apa|chicago|ieee|ama|nature)\b", re.I)
 _REF_LIMIT = re.compile(r"(?:max(?:imum)?|no\s+more\s+than|up\s+to|limit(?:ed)?\s+to)\s+(\d{1,3})\s+references", re.I)
+_DISPLAY_ITEM_LIMIT = re.compile(r"display items are limited to (\d{1,2})", re.I)
 
 
 def _strip_html(html: str) -> str:
     text = re.sub(r"<script[\s\S]*?</script>", " ", html, flags=re.I)
     text = re.sub(r"<style[\s\S]*?</style>", " ", text, flags=re.I)
+    text = re.sub(r"</(?:p|li|tr|td|h[1-6]|div)>", ". ", text, flags=re.I)
     text = re.sub(r"<[^>]+>", " ", text)
-    return re.sub(r"\s+", " ", text).strip()
+    return re.sub(r"\s+", " ", unescape(text)).strip()
+
+
+def _clean_int(value: str) -> int:
+    return int(value.replace(",", ""))
+
+
+def _extract_word_limit(text: str) -> int | None:
+    for pattern in _WORD_LIMIT_PATTERNS:
+        match = pattern.search(text)
+        if match:
+            return _clean_int(match.group(1))
+    if _NO_WORD_LIMIT.search(text):
+        return None
+    return None
+
+
+def _extract_abstract_limit(text: str) -> int | None:
+    for pattern in _ABSTRACT_LIMIT_PATTERNS:
+        match = pattern.search(text)
+        if match:
+            return _clean_int(match.group(1))
+    match = re.search(r"abstract should:.{0,500}?not exceed ([\d,]{2,4}) words", text, flags=re.I)
+    if match:
+        return _clean_int(match.group(1))
+    return None
+
+
+def _extract_reference_style(text: str) -> str | None:
+    lowered = text.lower()
+    if "free reference style" in lowered or "references may be submitted in any style or format" in lowered:
+        return "free"
+    if "one of two reference styles" in lowered and "harvard" in lowered and "vancouver" in lowered:
+        return "harvard/vancouver"
+    if "standard nature referencing style" in lowered or "nature referencing style" in lowered:
+        return "nature"
+    match = _REF_STYLE.search(text)
+    return match.group(1).lower() if match else None
 
 
 def _get(url: str, refresh: bool = False) -> str:
@@ -67,22 +115,19 @@ def _get(url: str, refresh: bool = False) -> str:
 def _extract_rules(journal: str, url: str, html: str) -> JournalRules:
     text = _strip_html(html)
     rules = JournalRules(journal=journal, source_url=url)
-    m = _WORD_LIMIT.search(text)
-    if m:
-        rules.word_limit = int(m.group(1))
-    m = _ABSTRACT_LIMIT.search(text)
-    if m:
-        rules.abstract_limit = int(m.group(1))
-    m = _DPI.search(text)
-    if m:
-        rules.figure_dpi = int(m.group(1))
+    rules.word_limit = _extract_word_limit(text)
+    rules.abstract_limit = _extract_abstract_limit(text)
+    dpi_values = sorted({_clean_int(match) for match in _DPI.findall(text)})
+    if dpi_values:
+        rules.figure_dpi = dpi_values[0]
     rules.figure_formats = sorted({f.upper().replace("JPEG", "JPG") for f in _FORMATS.findall(text)})
-    m = _REF_STYLE.search(text)
-    if m:
-        rules.reference_style = m.group(1).lower()
+    rules.reference_style = _extract_reference_style(text)
     m = _REF_LIMIT.search(text)
     if m:
-        rules.reference_limit = int(m.group(1))
+        rules.reference_limit = _clean_int(m.group(1))
+    m = _DISPLAY_ITEM_LIMIT.search(text)
+    if m:
+        rules.table_max = _clean_int(m.group(1))
     for kw in ["word", "figure", "reference", "table", "abstract"]:
         for sent in re.split(r"(?<=[.!?])\s+", text):
             if kw in sent.lower() and 20 < len(sent) < 300:
