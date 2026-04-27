@@ -5,7 +5,10 @@ from sn_lib.venues import search_venues
 from sn_lib.ranking import rank_venues
 
 @respx.mock
-def test_end_to_end_strategy(tmp_path, tmp_config_dir):
+def test_end_to_end_strategy(tmp_path, tmp_config_dir, monkeypatch):
+    monkeypatch.delenv("ELSEVIER_API_KEY", raising=False)
+    monkeypatch.delenv("SCOPUS_API_KEY", raising=False)
+    monkeypatch.setattr("sn_lib.config._dotenv_path", lambda: tmp_path / ".env")
     p = tmp_path / "m.docx"
     d = Document()
     d.add_heading("Gradient Methods for Widget Optimization", 0)
@@ -41,6 +44,12 @@ def test_end_to_end_strategy(tmp_path, tmp_config_dir):
                 "primary_topic": {"display_name": "Widget optimization"},
             }
         ]})
+    )
+    respx.get("https://api.crossref.org/journals/1").mock(
+        return_value=httpx.Response(200, json={"message": {"title": "J Widget", "publisher": "X", "ISSN": ["1"]}})
+    )
+    respx.get("https://api.crossref.org/journals/2").mock(
+        return_value=httpx.Response(200, json={"message": {"title": "J Astronomy", "publisher": "Y", "ISSN": ["2"]}})
     )
     venues = search_venues(ms.abstract or ms.title, per_page=10)
     ranked = rank_venues(["widget optimization", "gradient methods"], venues)

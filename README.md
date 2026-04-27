@@ -1,20 +1,20 @@
 # submission-nav
 
-`submission-nav` is a local skill/plugin set for academic submission workflow support.
+`submission-nav` is an early-preview GitHub skill project for academic submission workflow support.
 
-It is designed to feel like a reusable agent capability first, with local helper code running underneath when needed.
+It gives an AI coding agent reusable workflows for journal targeting, author-rule lookup, manuscript format checks, and submission/revision planning. Local helper code runs underneath the skill when deterministic parsing, API lookup, caching, or scoring is needed.
 
-## Included skills
+This is decision-support software, not an automatic journal selector. Always verify final journal policies, fees, indexing, and scope on the publisher's official site before submission.
 
-- `sn-config` - set up API credentials
-- `submission-strategist` - rank journal targets for a manuscript
+## Capabilities
+
+- Journal and venue targeting from PDF/DOCX manuscripts
   - can target journals, conferences, or both
   - supports strategy-aware ordering such as balanced, ambitious, safe, fast, low-cost, OA-only, or broad exploration
-- `journal-rules` - fetch and summarize author instructions
-- `format-checker` - check manuscript figures/text against cached journal rules
-- `pre-submission-revision` - prioritize manuscript improvements before submission
-- `review-revision-strategist` - triage reviewer comments and plan revisions
-- `response-letter-drafter` - draft point-by-point response letters
+- Journal author-rule fetching and local caching
+- Format checks against cached journal rules
+- Pre-submission revision planning
+- Reviewer-comment triage and response-letter drafting
 
 ## Install
 
@@ -34,7 +34,7 @@ npx skills add . --skill submission-nav -a codex
 
 Use `--copy` if symlinks are inconvenient on your platform. For local-path installs, run from a clean checkout or remove local `temp_sn/` outputs first; installing from a Git URL only includes tracked project files.
 
-The repository also contains individual workflow skill files under `skills/`, but the recommended `npx skills add` target is the root `submission-nav` skill. It includes the bundled helper runtime under `scripts/`; installing only an individual workflow skill may omit those helpers.
+The recommended `npx skills add` target is the root `submission-nav` skill. The repository also contains internal workflow files under `skills/`, but installing one of those directly may omit the helper runtime under `scripts/`.
 
 ### Manual
 
@@ -48,7 +48,7 @@ The setup script prepares the local helper runtime for the skills. Users should 
 
 ## First use
 
-Run `sn-config` to save optional credentials in the repo-local `.env`.
+After installing the skill, ask your agent to use `submission-nav` and run the setup check. Then use the `sn-config` workflow to save optional credentials in the installed skill's repo-local `.env`.
 
 Supported environment variables:
 
@@ -75,12 +75,25 @@ Conference support is currently aimed at computer-science-style venue discovery 
 
 ## Notes
 
-- Rule extraction is heuristic and should still be checked against the journal's official page.
+- Rule extraction is heuristic and must be checked against the journal's official page.
 - Figure DPI detection is strongest when the manuscript is available as PDF.
 - Review planning and response-letter drafting are intentionally separate steps.
 
-## Docs
+## Known Limitations
 
-- Refactor plan: [docs/refactor-plan.md](docs/refactor-plan.md)
-- Developer setup and internals: [docs/development.md](docs/development.md)
-- Verification process: [docs/verification.md](docs/verification.md)
+- Publisher sites may block automated fetching, require JavaScript, or show cookie/interstitial pages.
+- Journal metadata, APCs, OA status, and ranking signals can be incomplete or stale.
+- Venue recommendations are probabilistic decision support. They are not acceptance predictions.
+- Broad journals and megajournals can be hard to rank because their scope is intentionally wide.
+- Conference support is currently strongest for computer-science-style venues available through OpenAlex/DBLP metadata.
+- Users should not submit based only on cached rules; always inspect the live author instructions.
+
+## Development
+
+Run focused tests from the repository root:
+
+```bash
+uv run --project scripts python -m pytest
+```
+
+Generated evaluation artifacts belong under `temp_sn/`, which is ignored by git.

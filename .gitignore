@@ -9,3 +9,4 @@ __pycache__/
 docs/
 temp_sn/
 .env
+.agents/
