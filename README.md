@@ -1,10 +1,10 @@
 # submission-nav
 
-`submission-nav` is an early-preview GitHub skill project for academic submission workflow support.
+`submission-nav` helps AI coding agents support academic submission workflows from manuscript triage to journal targeting and revision planning.
 
-It gives an AI coding agent reusable workflows for journal targeting, author-rule lookup, manuscript format checks, and submission/revision planning. Local helper code runs underneath the skill when deterministic parsing, API lookup, caching, or scoring is needed.
+It combines reusable skill instructions with local helper tools for manuscript parsing, venue metadata lookup, author-guideline caching, format checks, and strategy-aware ranking. The goal is to turn "where should I submit this?" into a structured shortlist with visible tradeoffs instead of a one-off guess.
 
-This is decision-support software, not an automatic journal selector. Always verify final journal policies, fees, indexing, and scope on the publisher's official site before submission.
+The skill is designed for practical decision support: it can suggest likely venues, flag scope or article-type risks, compare author instructions, and prepare next-step submission work. Final journal policies, fees, indexing, and scope should still be confirmed on the publisher's official site before submission.
 
 ## Capabilities
 
@@ -16,11 +16,19 @@ This is decision-support software, not an automatic journal selector. Always ver
 - Pre-submission revision planning
 - Reviewer-comment triage and response-letter drafting
 
+## Example Uses
+
+- "Use `submission-nav` to recommend journals for this manuscript."
+- "Find author instructions for my top three target journals."
+- "Check whether my manuscript and figures look ready for this journal."
+- "Help me choose between a high-impact stretch journal and a safer fallback."
+- "Draft a revision plan from these reviewer comments."
+
 ## Install
 
-### Recommended: npx skills
+### npx skills
 
-Install the self-contained toolkit skill with:
+Install the self-contained toolkit skill:
 
 ```bash
 npx skills add <repo-url> --skill submission-nav -a codex
@@ -46,9 +54,9 @@ The recommended `npx skills add` target is the root `submission-nav` skill. The 
 
 The setup script prepares the local helper runtime for the skills. Users should not need to manage the Python environment manually during normal use.
 
-## First use
+## First Use
 
-After installing the skill, ask your agent to use `submission-nav` and run the setup check. Then use the `sn-config` workflow to save optional credentials in the installed skill's repo-local `.env`.
+After installing, ask your agent to use `submission-nav` and run the setup check. Then use the `sn-config` workflow to save optional credentials in the installed skill's repo-local `.env`.
 
 Supported environment variables:
 
@@ -59,7 +67,7 @@ Supported environment variables:
 
 An example file is included at [`.env.example`](.env.example).
 
-## What The Skills Use Internally
+## How It Works
 
 The skills call local helper commands to parse manuscripts, retrieve venue metadata, cache journal rules, and run format checks. That runtime is an implementation detail of the plugin and should not normally matter to end users.
 
@@ -73,20 +81,19 @@ The skills call local helper commands to parse manuscripts, retrieve venue metad
 
 Conference support is currently aimed at computer-science-style venue discovery through OpenAlex source types, with DBLP used for conference name/acronym normalization when available. Conference-specific ranking sources such as CORE are not integrated yet.
 
-## Notes
+## Practical Notes
 
-- Rule extraction is heuristic and must be checked against the journal's official page.
+- Rule extraction is cached locally and works well for many static author-guideline pages; verify final details on the journal's live page before submission.
 - Figure DPI detection is strongest when the manuscript is available as PDF.
 - Review planning and response-letter drafting are intentionally separate steps.
 
-## Known Limitations
+## Current Boundaries
 
-- Publisher sites may block automated fetching, require JavaScript, or show cookie/interstitial pages.
-- Journal metadata, APCs, OA status, and ranking signals can be incomplete or stale.
-- Venue recommendations are probabilistic decision support. They are not acceptance predictions.
-- Broad journals and megajournals can be hard to rank because their scope is intentionally wide.
-- Conference support is currently strongest for computer-science-style venues available through OpenAlex/DBLP metadata.
-- Users should not submit based only on cached rules; always inspect the live author instructions.
+- Some publisher pages block automated fetching or require JavaScript; cached rules and manual URLs are supported fallbacks.
+- Journal metadata, APCs, OA status, and ranking signals come from public data sources and can be incomplete.
+- Venue recommendations are prioritization aids, not acceptance predictions.
+- Broad journals and megajournals may need a user-selected strategy such as `safe`, `ambitious`, `low-cost`, or `broad`.
+- Conference support is strongest for computer-science-style venues available through OpenAlex and DBLP metadata.
 
 ## Development
 
