@@ -27,6 +27,11 @@ EXIT_EXTERNAL = 3
 EXIT_INTERNAL = 4
 
 
+def _print_home(args) -> int:
+    print(Path(__file__).resolve().parents[2])
+    return 0
+
+
 def emit_json(payload, out_path: str | None = None) -> None:
     text = json.dumps(payload, indent=2, ensure_ascii=False)
     if out_path:
@@ -95,8 +100,18 @@ def _ensure_concepts(args) -> Path:
 def _cmd_venues(args) -> int:
     from .venues import search_venues
 
-    run = paths_for(None, args.run_dir) if args.run_dir else paths_for(args.manuscript, None) if getattr(args, "manuscript", None) else None
-    out_path = Path(args.out) if args.out else (run.run_dir / query_filename(args.query) if run else Path(query_filename(args.query)))
+    if args.run_dir:
+        run = paths_for(None, args.run_dir)
+    elif getattr(args, "manuscript", None):
+        run = paths_for(args.manuscript, None)
+    else:
+        run = None
+    if args.out:
+        out_path = Path(args.out)
+    elif run:
+        out_path = run.run_dir / query_filename(args.query)
+    else:
+        raise ValueError("sn venues needs --manuscript, --run-dir, or --out")
     if not outputs_fresh([], [out_path], args.force):
         hits = search_venues(args.query, per_page=args.per_page, venue_types=tuple(args.venue_types))
         _write(out_path, [hit.to_dict() for hit in hits])
@@ -334,7 +349,8 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("query")
     p.add_argument("--manuscript")
     p.add_argument("--per-page", type=int, default=40)
-    p.add_argument("--venue-types", nargs="+", default=["journal"])
+    p.add_argument("--venue-types", nargs="+", default=["journal"],
+                   choices=["journal", "conference"])
     p.add_argument("--out")
     p.set_defaults(func=_cmd_venues)
 
@@ -354,7 +370,8 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--strategy", default="balanced", choices=["balanced", "ambitious", "safe", "fast", "low-cost", "oa-only", "broad"])
     p.add_argument("--apc-budget", type=float)
     p.add_argument("--oa-preference", default="any", choices=["any", "oa-only", "avoid-oa"])
-    p.add_argument("--venue-types", nargs="+", default=["journal"])
+    p.add_argument("--venue-types", nargs="+", default=["journal"],
+                   choices=["journal", "conference"])
     p.add_argument("--per-page", type=int, default=40)
     p.add_argument("--agent-top-n", type=int, default=12)
     p.add_argument("--max-queries", type=int, default=4)
@@ -398,7 +415,7 @@ def _build_parser() -> argparse.ArgumentParser:
     p.set_defaults(func=_cmd_doctor)
 
     p = sub.add_parser("home")
-    p.set_defaults(func=lambda args: (print(Path(__file__).resolve().parents[2]), 0)[1])
+    p.set_defaults(func=_print_home)
 
     p = sub.add_parser("runs")
     runs_sub = p.add_subparsers(dest="runs_action", required=True)
