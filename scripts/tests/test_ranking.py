@@ -1,5 +1,5 @@
 from sn_lib.venues import VenueHit
-from sn_lib.ranking import rank_venues, summarize_ranked
+from sn_lib.ranking import rank_venues, summarize_bucketed, summarize_ranked
 
 def _v(name, concepts, impact, oa=False, apc=None, publisher=None, source="openalex"):
     return VenueHit(id=name, name=name, issn=None, publisher=publisher,
@@ -45,6 +45,21 @@ def test_summarize_ranked_limits_tail_and_concepts():
     assert len(summary) == 1
     assert summary[0]["journal"] == "Computational Toxicology"
     assert summary[0]["top_concepts"] == ["a", "b"]
+
+
+def test_summarize_bucketed_groups_targets_and_avoids():
+    target = _v("Trusted Biomedical Journal", ["biomedical machine learning"], 2.0, publisher="Known Publisher", source="openalex+scopus")
+    review = _v("Systematic Reviews", ["biomedical machine learning"], 4.0, oa=True)
+    ranked = rank_venues(
+        ["biomedical machine learning"],
+        [review, target],
+        ms_title="Machine Learning-based Prediction from Clinical Omics Data",
+        ms_abstract="We analyzed patient omics data and trained machine learning classifiers.",
+    )
+    summary = summarize_bucketed(ranked, strategy="balanced", top_n=5)
+    assert summary["buckets"]["stretch"][0]["journal"] == "Trusted Biomedical Journal"
+    assert summary["buckets"]["avoid"][0]["journal"] == "Systematic Reviews"
+    assert summary["top"][0]["bucket"] == "stretch"
 
 
 def test_broad_journal_prestige_does_not_beat_scope_by_default():

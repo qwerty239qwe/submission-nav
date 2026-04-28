@@ -170,3 +170,70 @@ def summarize_ranked(
     if top_n is not None:
         items = items[:top_n]
     return [r.to_summary_dict(concept_limit=concept_limit) for r in items]
+
+
+def _bucket_for(item: Ranked) -> tuple[str, str]:
+    rationale = item.rationale
+    risk = rationale.get("risk_label")
+    reasons = rationale.get("risk_reasons") or []
+    article_type_fit = rationale.get("article_type_fit") or 1.0
+    publisher_label = rationale.get("publisher_risk_label")
+    impact = _impact(item.venue.impact_proxy)
+    if publisher_label in {"potential_predatory_match", "hijacked_or_identity_risk"}:
+        return "avoid", "publisher integrity risk"
+    if article_type_fit <= 0.1:
+        return "avoid", "article type mismatch"
+    if risk == "high":
+        return "avoid", "high risk"
+    if article_type_fit < 0.7 or any("outside the manuscript" in reason for reason in reasons):
+        return "fallback", "scope or article-type caution"
+    if item.score >= 0.43 and impact >= 0.30:
+        return "stretch", "higher-impact plausible venue"
+    if item.score >= 0.50:
+        return "target", "best balance of fit and suitability"
+    if item.score >= 0.40:
+        return "safe", "plausible lower-risk fallback"
+    return "fallback", "low confidence or weak score"
+
+
+def summarize_bucketed(
+    ranked: list[Ranked],
+    strategy: str = "balanced",
+    top_n: int = 12,
+    per_bucket: int = 5,
+    concept_limit: int = 5,
+) -> dict:
+    bucket_order = {
+        "ambitious": ["stretch", "target", "safe", "fallback", "avoid"],
+        "safe": ["target", "safe", "fallback", "stretch", "avoid"],
+        "fast": ["safe", "target", "fallback", "stretch", "avoid"],
+        "low-cost": ["target", "safe", "fallback", "stretch", "avoid"],
+        "oa-only": ["target", "safe", "fallback", "stretch", "avoid"],
+        "broad": ["stretch", "target", "safe", "fallback", "avoid"],
+        "balanced": ["target", "stretch", "safe", "fallback", "avoid"],
+    }.get(strategy, ["target", "stretch", "safe", "fallback", "avoid"])
+    buckets: dict[str, list[dict]] = {name: [] for name in ["stretch", "target", "safe", "fallback", "avoid"]}
+    counts: dict[str, int] = {name: 0 for name in buckets}
+    for item in ranked:
+        bucket, reason = _bucket_for(item)
+        counts[bucket] += 1
+        row = item.to_summary_dict(concept_limit=concept_limit)
+        row["bucket"] = bucket
+        row["bucket_reason"] = reason
+        if len(buckets[bucket]) < per_bucket:
+            buckets[bucket].append(row)
+    ordered_top: list[dict] = []
+    for bucket in bucket_order:
+        for row in buckets[bucket]:
+            if len(ordered_top) >= top_n:
+                break
+            ordered_top.append(row)
+        if len(ordered_top) >= top_n:
+            break
+    return {
+        "strategy": strategy,
+        "bucket_order": bucket_order,
+        "top": ordered_top,
+        "buckets": buckets,
+        "counts": counts,
+    }

@@ -17,6 +17,12 @@ def test_query_filename_is_stable():
     assert query_filename("machine learning").startswith("venues_")
 
 
+def test_paths_for_includes_profile_path(tmp_path, tmp_config_dir):
+    ms = tmp_path / "paper.docx"
+    ms.write_text("x", encoding="utf-8")
+    assert paths_for(ms).profile.name == "ms_profile.json"
+
+
 def test_update_manifest_records_outputs(tmp_path, tmp_config_dir):
     ms = tmp_path / "paper.docx"
     ms.write_text("x", encoding="utf-8")

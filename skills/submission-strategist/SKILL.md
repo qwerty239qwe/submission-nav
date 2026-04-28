@@ -38,13 +38,20 @@ sn strategist "<manuscript>" --strategy broad --venue-types conference --agent-t
 
 2. Read the compact ranked summary path printed by the command. Use the full ranked JSON only when the compact summary looks thin or the user asks for a broader candidate set.
 
-3. Screen obvious article-type mismatches before presenting results:
+3. Use the bucketed output as the primary decision structure. The chained workflow writes a manuscript profile (`ms_profile.json`) and bucketed ranked summaries (`ranked_agent_<strategy>.json` and `ranked_buckets_<strategy>.json`) with:
+- `stretch`: plausible higher-impact options
+- `target`: strongest balance of fit and suitability
+- `safe`: lower-risk fallbacks
+- `fallback`: weak-score or caution cases
+- `avoid`: article-type, scope, or publisher-integrity mismatches
+
+4. Screen obvious article-type mismatches before presenting results:
 - review journals for original research
 - method journals for papers without a new method
 - data/resource journals for non-resource papers
 - elite broad-scope journals when the manuscript lacks correspondingly broad novelty
 
-4. Present a decision-oriented result.
+5. Present a decision-oriented result.
 
 ## Output
 
@@ -52,7 +59,7 @@ Return:
 - a Markdown table of the top 5 to 10 venues
 - the strategy used
 - a short rationale for the top pick
-- a submission ladder: stretch, target, safety
+- a submission ladder from the generated buckets: stretch, target, safe
 - caveats such as APC conflict, weak scope evidence, partial metadata enrichment, or low-confidence parsing
 - saved ranked-summary path for reuse
 

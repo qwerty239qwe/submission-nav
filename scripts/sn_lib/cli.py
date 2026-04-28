@@ -97,6 +97,32 @@ def _ensure_concepts(args) -> Path:
     return run.run_dir
 
 
+def _cmd_profile(args) -> int:
+    from .profile import build_profile
+
+    _ensure_concepts(args)
+    run = paths_for(args.manuscript, args.run_dir)
+    outputs = [run.profile]
+    if not outputs_fresh([run.ms_summary, run.concepts], outputs, args.force):
+        with run_lock(run.run_dir):
+            payload = build_profile(
+                _read_json(run.ms_summary),
+                _read_json(run.concepts),
+                oa_preference=getattr(args, "oa_preference", "any"),
+            )
+            _write(run.profile, payload)
+            update_manifest(run.run_dir, args.manuscript, "profile", outputs)
+    _print_ok("profile", run.profile)
+    return 0
+
+
+def _ensure_profile(args) -> Path:
+    run = paths_for(args.manuscript, args.run_dir)
+    if not run.profile.exists() or args.force:
+        _cmd_profile(args)
+    return run.run_dir
+
+
 def _cmd_venues(args) -> int:
     from .venues import search_venues
 
@@ -126,10 +152,10 @@ def _collect_venue_files(run_dir: Path) -> list[Path]:
 
 
 def _cmd_rank(args) -> int:
-    from .ranking import rank_venues, summarize_ranked
+    from .ranking import rank_venues, summarize_bucketed
     from .venues import VenueHit
 
-    _ensure_concepts(args)
+    _ensure_profile(args)
     run = paths_for(args.manuscript, args.run_dir)
     concepts_payload = _read_json(run.concepts)
     concepts = concepts_payload.get("concepts") if isinstance(concepts_payload, dict) else []
@@ -139,8 +165,9 @@ def _cmd_rank(args) -> int:
     suffix = strategy_suffix(args.strategy, args.oa_preference)
     ranked_out = run.run_dir / f"ranked_{suffix}.json"
     agent_out = run.run_dir / f"ranked_agent_{suffix}.json"
-    inputs = [run.concepts, run.ms_summary, *venue_files]
-    if not outputs_fresh(inputs, [ranked_out, agent_out], args.force):
+    bucketed_out = run.run_dir / f"ranked_buckets_{suffix}.json"
+    inputs = [run.concepts, run.ms_summary, run.profile, *venue_files]
+    if not outputs_fresh(inputs, [ranked_out, agent_out, bucketed_out], args.force):
         venues = []
         seen = set()
         for path in venue_files:
@@ -161,8 +188,10 @@ def _cmd_rank(args) -> int:
             ms_abstract=summary.get("abstract"),
         )
         _write(ranked_out, [item.to_dict() for item in ranked])
-        _write(agent_out, summarize_ranked(ranked, top_n=args.agent_top_n))
-        update_manifest(run.run_dir, args.manuscript, "rank", [ranked_out, agent_out])
+        bucketed = summarize_bucketed(ranked, strategy=args.strategy, top_n=args.agent_top_n)
+        _write(bucketed_out, bucketed)
+        _write(agent_out, bucketed)
+        update_manifest(run.run_dir, args.manuscript, "rank", [ranked_out, bucketed_out, agent_out])
     _print_ok("rank", agent_out)
     return 0
 
@@ -347,6 +376,12 @@ def _build_parser() -> argparse.ArgumentParser:
     add_common(p)
     p.add_argument("manuscript")
     p.set_defaults(func=_cmd_concepts)
+
+    p = sub.add_parser("profile")
+    add_common(p)
+    p.add_argument("manuscript")
+    p.add_argument("--oa-preference", default="any", choices=["any", "oa-only", "avoid-oa"])
+    p.set_defaults(func=_cmd_profile)
 
     p = sub.add_parser("venues")
     add_common(p)

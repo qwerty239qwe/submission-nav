@@ -27,6 +27,17 @@ def test_cli_parse_and_concepts(tmp_path, tmp_config_dir, capsys):
     assert "OK concepts" in out
 
 
+def test_cli_profile_writes_manuscript_profile(tmp_path, tmp_config_dir, capsys):
+    manuscript = tmp_path / "paper.docx"
+    _docx(manuscript)
+    assert main(["profile", str(manuscript)]) == 0
+    assert "OK profile" in capsys.readouterr().out
+    profile_path = next((tmp_config_dir / "runs").glob("*/ms_profile.json"))
+    payload = json.loads(profile_path.read_text(encoding="utf-8"))
+    assert payload["contribution_type"] in {"original_research", "clinical"}
+    assert "data_type" in payload
+
+
 def test_cli_config_set_supports_emails(tmp_path, tmp_config_dir, monkeypatch, capsys):
     monkeypatch.setattr("sn_lib.config._dotenv_path", lambda: tmp_path / ".env")
     assert main(["config", "set", "--key", "openalex_email", "--value", "me@example.org"]) == 0
@@ -100,3 +111,6 @@ def test_cli_strategist_runs_chained_workflow(tmp_path, tmp_config_dir, monkeypa
     out = capsys.readouterr().out
     assert "OK strategist" in out
     assert "J Widget" in out
+    payload = json.loads(out[out.index("{"):])
+    assert "buckets" in payload
+    assert payload["top"][0]["journal"] == "J Widget"
