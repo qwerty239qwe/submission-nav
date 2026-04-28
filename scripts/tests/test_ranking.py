@@ -78,6 +78,34 @@ def test_strategy_penalizes_review_journal_for_original_research():
     assert ranked[1].rationale["risk_label"] == "high"
 
 
+def test_strategy_penalizes_systematic_reviews_journal_for_original_research():
+    review = _v("Systematic Reviews", ["meta-analysis and systematic reviews"], 4.0, oa=True)
+    target = _v("Clinical Genetics", ["genetic disorders", "molecular diagnosis"], 3.0)
+    ranked = rank_venues(
+        ["genetic diagnosis", "biomedical machine learning", "patient cohort"],
+        [review, target],
+        ms_title="Machine Learning-based Prediction of a Genetic Disorder from Clinical Omics Data",
+        ms_abstract="We analyzed omics data from patients and trained machine learning classifiers.",
+    )
+    assert ranked[0].venue.name == "Clinical Genetics"
+    assert ranked[1].rationale["article_type_fit"] <= 0.1
+    assert "review-only/review-focused" in ranked[1].rationale["risk_reasons"][0]
+
+
+def test_ambitious_strategy_caps_review_only_venue_even_with_high_impact():
+    review = _v("Annual Review of Biomedical Science", ["biochemistry", "genetics"], 12.0)
+    target = _v("Genome Biology", ["genomics", "omics", "genetic disorders"], 5.0, oa=True)
+    ranked = rank_venues(
+        ["genetic diagnosis", "biomedical machine learning", "patient cohort"],
+        [review, target],
+        strategy="ambitious",
+        ms_title="Machine Learning-based Prediction of a Genetic Disorder from Clinical Omics Data",
+        ms_abstract="We analyzed omics data from patients and trained machine learning classifiers.",
+    )
+    assert ranked[0].venue.name == "Genome Biology"
+    assert ranked[1].score <= 0.25
+
+
 def test_strategy_penalizes_methods_journal_without_method_novelty():
     methods = _v("Nature Methods", ["methods", "computational biology"], 18.0)
     target = _v("Computational Toxicology", ["toxicology", "machine learning"], 3.0)
@@ -98,6 +126,48 @@ def test_ambitious_strategy_keeps_broad_option_more_competitive():
     ambitious = rank_venues(["mitochondrial toxicity", "machine learning"], [broad, target], strategy="ambitious")
     assert safe[0].venue.name == "Computational Toxicology"
     assert ambitious[1].score > safe[1].score
+
+
+def test_ambitious_strategy_penalizes_weak_scope_nature_family_venue():
+    weak = _v("Nature Cell Biology", ["spaceflight effects on biology"], 10.0)
+    target = _v("Genome Biology", ["genomics", "omics", "genetic disorders"], 5.0, oa=True)
+    ranked = rank_venues(
+        ["genetic diagnosis", "biomedical machine learning", "patient cohort"],
+        [weak, target],
+        strategy="ambitious",
+        ms_title="Machine Learning-based Prediction of a Genetic Disorder from Clinical Omics Data",
+        ms_abstract="We analyzed omics data from patients and trained machine learning classifiers.",
+    )
+    assert ranked[0].venue.name == "Genome Biology"
+    assert ranked[1].rationale["article_type_fit"] <= 0.45
+    assert any("weak scope evidence" in reason for reason in ranked[1].rationale["risk_reasons"])
+
+
+def test_biomedical_manuscript_penalizes_physical_science_ml_venue():
+    off_scope = _v("Computer Physics Communications", ["machine learning in materials science", "physical sciences"], 3.0)
+    target = _v("Computational and Structural Biotechnology Journal", ["machine learning in healthcare", "bioinformatics"], 2.0, oa=True)
+    ranked = rank_venues(
+        ["biomedical machine learning", "clinical omics", "patient cohort"],
+        [off_scope, target],
+        ms_title="Machine Learning-based Prediction from Clinical Omics Data",
+        ms_abstract="We analyzed patient omics data and trained machine learning classifiers.",
+    )
+    assert ranked[0].venue.name == "Computational and Structural Biotechnology Journal"
+    assert ranked[1].rationale["scope_fit"] <= 0.35
+    assert any("outside the manuscript" in reason for reason in ranked[1].rationale["risk_reasons"])
+
+
+def test_biomedical_manuscript_penalizes_broad_engineering_proceedings():
+    off_scope = _v("Proceedings of SPIE, the International Society for Optical Engineering", ["medical imaging", "physical sciences"], 1.0)
+    target = _v("Clinical Genetics", ["genetic disorders", "molecular diagnosis"], 3.0)
+    ranked = rank_venues(
+        ["genetic diagnosis", "biomedical machine learning", "patient cohort"],
+        [off_scope, target],
+        ms_title="Machine Learning-based Prediction of a Genetic Disorder from Clinical Omics Data",
+        ms_abstract="We analyzed omics data from patients and trained machine learning classifiers.",
+    )
+    assert ranked[0].venue.name == "Clinical Genetics"
+    assert ranked[1].rationale["scope_fit"] <= 0.35
 
 
 def test_low_cost_strategy_penalizes_high_apc():

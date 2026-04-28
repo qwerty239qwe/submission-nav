@@ -61,6 +61,10 @@ def _has_any(text: str, needles: tuple[str, ...]) -> bool:
     return any(needle in text for needle in needles)
 
 
+def _has_phrase(text: str, phrases: tuple[str, ...]) -> bool:
+    return any(re.search(rf"(?<![a-z0-9]){re.escape(phrase)}(?![a-z0-9])", text) for phrase in phrases)
+
+
 def infer_manuscript_profile(
     concepts: list[str],
     title: str | None = None,
@@ -124,14 +128,56 @@ def _domain_scope_fit(profile: ManuscriptProfile, venue: VenueHit, base_fit: flo
     for domain in profile.domains:
         terms = boosts.get(domain, ())
         if terms and _has_any(text, terms):
-            score = max(score, 0.78 if domain in {"toxicology", "cheminformatics"} else 0.62)
+            if domain in {"toxicology", "cheminformatics"}:
+                score = max(score, 0.78)
+            elif domain == "machine_learning":
+                if _has_any(text, ("health", "medicine", "clinical", "genetic", "genomic", "rna", "bioinformatics", "biomedical")):
+                    score = max(score, 0.62)
+                else:
+                    score = max(score, 0.50)
+            else:
+                score = max(score, 0.62)
     return min(1.0, score)
+
+
+def _scope_mismatch_adjustment(profile: ManuscriptProfile, venue: VenueHit, scope_fit: float) -> tuple[float, list[str]]:
+    name = _norm(venue.name)
+    concepts = _norm(" ".join(venue.concepts))
+    text = f"{name} {concepts}"
+    biomedical_profile = bool({"clinical", "bioinformatics"} & set(profile.domains)) or _has_any(
+        " ".join(profile.domains),
+        ("clinical", "bioinformatics"),
+    )
+    if not biomedical_profile:
+        return scope_fit, []
+    biomedical_terms = (
+        "health", "medicine", "medical", "clinical", "patient", "genetic", "genomic",
+        "rna", "transcriptomic", "bioinformatics", "biomedical", "molecular biology",
+        "mitochondrial", "disease", "diagnosis",
+    )
+    off_scope_terms = (
+        "physical sciences", "materials science", "materials chemistry", "physics",
+        "spectroscopy", "optical engineering", "remote-sensing", "ecology",
+        "environmental dna", "food", "topic modeling", "natural language processing",
+        "information processing",
+    )
+    off_scope_name_terms = (
+        "computer physics", "information processing", "optical engineering",
+        "proceedings of spie", "spie",
+    )
+    if _has_phrase(name, off_scope_name_terms) and not _has_phrase(name, biomedical_terms):
+        return min(scope_fit, 0.35), ["venue appears outside the manuscript's biomedical/genomic scope"]
+    if _has_phrase(text, off_scope_terms) and not _has_phrase(text, biomedical_terms):
+        return min(scope_fit, 0.35), ["venue appears outside the manuscript's biomedical/genomic scope"]
+    return scope_fit, []
 
 
 def _venue_kind(venue: VenueHit) -> set[str]:
     name = _norm(venue.name)
+    concepts = _norm(" ".join(venue.concepts))
+    text = f"{name} {concepts}"
     kinds: set[str] = set()
-    if re.search(r"\b(nature reviews|annual reviews?|trends in|current opinion)\b", name):
+    if re.search(r"\b(nature reviews|annual reviews?|annual review|systematic reviews?|reviews? in|journal of reviews?|review of|trends in|current opinion|critical reviews?)\b", name):
         kinds.add("review")
     if re.search(r"\b(methods?|protocols?)\b", name):
         kinds.add("methods")
@@ -143,6 +189,8 @@ def _venue_kind(venue: VenueHit) -> set[str]:
         kinds.add("elite_family")
     if name in {"nature medicine", "the lancet", "lancet", "new england journal of medicine"}:
         kinds.add("clinical_elite")
+    if "elite_family" in kinds and not _has_any(text, ("mitochondrial", "genetic", "genomics", "rna", "transcriptomic", "diagnosis", "clinical")):
+        kinds.add("weak_elite_scope")
     return kinds
 
 
@@ -153,8 +201,8 @@ def _article_type_fit(profile: ManuscriptProfile, venue: VenueHit) -> tuple[floa
     ctype = profile.contribution_type
 
     if "review" in kinds and ctype != "review":
-        fit = min(fit, 0.15)
-        reasons.append("review-focused venue for a non-review manuscript")
+        fit = min(fit, 0.05)
+        reasons.append("review-only/review-focused venue for a non-review manuscript")
     if "methods" in kinds and ctype not in {"method_development", "software"}:
         fit = min(fit, 0.45)
         reasons.append("methods/protocol venue but manuscript is not primarily a novel method")
@@ -167,9 +215,12 @@ def _article_type_fit(profile: ManuscriptProfile, venue: VenueHit) -> tuple[floa
     if "clinical_elite" in kinds and ctype != "clinical":
         fit = min(fit, 0.30)
         reasons.append("clinical elite venue but manuscript is not a clinical study")
-    if "elite_family" in kinds and ctype == "original_research":
+    if "elite_family" in kinds and ctype != "review":
         fit = min(fit, 0.55)
         reasons.append("selective Nature/Cell-family venue needs unusually strong novelty")
+    if "weak_elite_scope" in kinds:
+        fit = min(fit, 0.45)
+        reasons.append("selective venue has weak scope evidence for this manuscript")
     return fit, reasons
 
 
@@ -219,7 +270,7 @@ def _strategy_mix(
     strategy = strategy if strategy in STRATEGIES else "balanced"
     impact = min(1.0, (venue.impact_proxy or 0.0) / 10.0)
     if strategy == "ambitious":
-        return 0.42 * raw_score + 0.34 * suitability_score + 0.24 * impact - 0.08 * (1.0 - article_type_fit)
+        return 0.42 * raw_score + 0.34 * suitability_score + 0.24 * impact - 0.20 * (1.0 - article_type_fit)
     if strategy == "safe":
         return 0.25 * raw_score + 0.70 * suitability_score + 0.05 * impact - 0.18 * (1.0 - article_type_fit)
     if strategy == "fast":
@@ -243,9 +294,11 @@ def score_suitability(
     oa_preference: str = "any",
 ) -> Suitability:
     scope_fit = _domain_scope_fit(profile, venue, base_fit)
+    scope_fit, scope_reasons = _scope_mismatch_adjustment(profile, venue, scope_fit)
     article_type_fit, reasons = _article_type_fit(profile, venue)
     cost_fit, cost_reasons = _cost_fit(venue, apc_budget_usd)
     oa_fit, oa_reasons = _oa_fit(venue, oa_preference or profile.oa_preference)
+    reasons.extend(scope_reasons)
     reasons.extend(cost_reasons)
     reasons.extend(oa_reasons)
 
@@ -265,6 +318,12 @@ def score_suitability(
         venue,
         article_type_fit,
     )
+    if article_type_fit <= 0.10:
+        strategy_score = min(strategy_score, 0.25)
+    elif article_type_fit < 0.50:
+        strategy_score = min(strategy_score, 0.40)
+    elif article_type_fit < 0.70:
+        strategy_score = min(strategy_score, 0.52)
     return Suitability(
         score=max(0.0, min(1.0, suitability_score)),
         strategy_score=max(0.0, min(1.0, strategy_score)),
