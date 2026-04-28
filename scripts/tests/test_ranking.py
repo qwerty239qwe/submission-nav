@@ -1,10 +1,10 @@
 from sn_lib.venues import VenueHit
 from sn_lib.ranking import rank_venues, summarize_ranked
 
-def _v(name, concepts, impact, oa=False, apc=None):
-    return VenueHit(id=name, name=name, issn=None, publisher=None,
+def _v(name, concepts, impact, oa=False, apc=None, publisher=None, source="openalex"):
+    return VenueHit(id=name, name=name, issn=None, publisher=publisher,
                     is_oa=oa, apc_usd=apc, impact_proxy=impact,
-                    h_index=None, concepts=concepts, source="openalex")
+                    h_index=None, concepts=concepts, source=source)
 
 def test_fit_dominates_when_equal_impact():
     ms_concepts = ["widget optimization", "gradient methods"]
@@ -69,9 +69,9 @@ def test_strategy_penalizes_review_journal_for_original_research():
     review = _v("Nature Reviews Drug Discovery", ["drug discovery", "pharmacology"], 12.0)
     target = _v("Computational Toxicology", ["toxicology", "machine learning"], 3.0)
     ranked = rank_venues(
-        ["mitochondrial toxicity", "machine learning", "drug development"],
+        ["toxicology", "machine learning", "drug development"],
         [review, target],
-        ms_title="Machine Learning for Interpretable Prediction of Mitochondrial Toxicity",
+        ms_title="Machine Learning for Interpretable Prediction of Compound Toxicity",
     )
     assert ranked[0].venue.name == "Computational Toxicology"
     assert ranked[1].rationale["article_type_fit"] < 0.5
@@ -110,10 +110,10 @@ def test_strategy_penalizes_methods_journal_without_method_novelty():
     methods = _v("Nature Methods", ["methods", "computational biology"], 18.0)
     target = _v("Computational Toxicology", ["toxicology", "machine learning"], 3.0)
     ranked = rank_venues(
-        ["mitochondrial toxicity", "molecular fingerprints", "machine learning"],
+        ["compound toxicity", "molecular descriptors", "machine learning"],
         [methods, target],
-        ms_title="Machine Learning for Interpretable Prediction of Mitochondrial Toxicity",
-        ms_abstract="We predict mitochondrial toxicity using existing molecular fingerprints and classifiers.",
+        ms_title="Machine Learning for Interpretable Prediction of Compound Toxicity",
+        ms_abstract="We predict compound toxicity using existing molecular descriptors and classifiers.",
     )
     assert ranked[0].venue.name == "Computational Toxicology"
     assert ranked[1].rationale["article_type_fit"] < 0.7
@@ -122,8 +122,8 @@ def test_strategy_penalizes_methods_journal_without_method_novelty():
 def test_ambitious_strategy_keeps_broad_option_more_competitive():
     broad = _v("Science", ["science"], 30.0)
     target = _v("Computational Toxicology", ["toxicology", "machine learning"], 3.0)
-    safe = rank_venues(["mitochondrial toxicity", "machine learning"], [broad, target], strategy="safe")
-    ambitious = rank_venues(["mitochondrial toxicity", "machine learning"], [broad, target], strategy="ambitious")
+    safe = rank_venues(["compound toxicity", "machine learning"], [broad, target], strategy="safe")
+    ambitious = rank_venues(["compound toxicity", "machine learning"], [broad, target], strategy="ambitious")
     assert safe[0].venue.name == "Computational Toxicology"
     assert ambitious[1].score > safe[1].score
 
@@ -184,3 +184,29 @@ def test_oa_only_strategy_penalizes_non_oa():
     ranked = rank_venues(["toxicology"], [closed, oa], strategy="oa-only", oa_preference="oa-only")
     assert ranked[0].venue.name == "Open Toxicology"
     assert "open-access-only preference" in ranked[1].rationale["risk_reasons"][0]
+
+
+def test_ranking_caps_local_potential_predatory_match(tmp_config_dir):
+    risky = _v(
+        "High Impact Biomedical Journal",
+        ["biomedical machine learning"],
+        20.0,
+        oa=True,
+        apc=1500,
+        publisher="Questionable Academic Press",
+    )
+    target = _v(
+        "Trusted Biomedical Journal",
+        ["biomedical machine learning"],
+        2.0,
+        publisher="Known Publisher",
+        source="openalex+scopus",
+    )
+    (tmp_config_dir / "publisher_risk.json").write_text(
+        '{"potential_predatory_publishers": ["Questionable Academic Press"]}',
+        encoding="utf-8",
+    )
+    ranked = rank_venues(["biomedical machine learning"], [risky, target], strategy="ambitious")
+    assert ranked[0].venue.name == "Trusted Biomedical Journal"
+    assert ranked[1].rationale["publisher_risk_label"] == "potential_predatory_match"
+    assert ranked[1].score <= 0.15

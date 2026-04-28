@@ -5,6 +5,7 @@ from dataclasses import dataclass
 
 from rapidfuzz import fuzz
 
+from .publisher_risk import assess_publisher_risk
 from .venues import VenueHit
 
 
@@ -35,6 +36,9 @@ class Suitability:
     article_type_fit: float
     cost_fit: float
     oa_fit: float
+    publisher_integrity_fit: float
+    publisher_risk_label: str
+    publisher_risk_reasons: tuple[str, ...]
     risk_label: str
     risk_reasons: tuple[str, ...]
     profile: ManuscriptProfile
@@ -47,6 +51,9 @@ class Suitability:
             "article_type_fit": round(self.article_type_fit, 3),
             "cost_fit": round(self.cost_fit, 3),
             "oa_fit": round(self.oa_fit, 3),
+            "publisher_integrity_fit": round(self.publisher_integrity_fit, 3),
+            "publisher_risk_label": self.publisher_risk_label,
+            "publisher_risk_reasons": list(self.publisher_risk_reasons),
             "risk_label": self.risk_label,
             "risk_reasons": list(self.risk_reasons),
             "profile": self.profile.to_dict(),
@@ -250,6 +257,8 @@ def _oa_fit(venue: VenueHit, oa_preference: str) -> tuple[float, list[str]]:
 
 
 def _risk_label(reasons: list[str], article_type_fit: float, strategy_score: float) -> str:
+    if any("potential-predatory" in reason or "hijacked" in reason for reason in reasons):
+        return "high"
     if article_type_fit <= 0.35 or len(reasons) >= 2:
         return "high"
     if strategy_score < 0.45 or article_type_fit < 0.7 or reasons:
@@ -298,15 +307,20 @@ def score_suitability(
     article_type_fit, reasons = _article_type_fit(profile, venue)
     cost_fit, cost_reasons = _cost_fit(venue, apc_budget_usd)
     oa_fit, oa_reasons = _oa_fit(venue, oa_preference or profile.oa_preference)
+    publisher_risk = assess_publisher_risk(venue)
+    publisher_reasons = [f"publisher risk: {reason}" for reason in publisher_risk.reasons]
     reasons.extend(scope_reasons)
     reasons.extend(cost_reasons)
     reasons.extend(oa_reasons)
+    if publisher_risk.label in {"caution", "potential_predatory_match", "hijacked_or_identity_risk"}:
+        reasons.extend(publisher_reasons)
 
     suitability_score = (
-        0.50 * scope_fit
-        + 0.30 * article_type_fit
+        0.45 * scope_fit
+        + 0.25 * article_type_fit
         + 0.10 * cost_fit
         + 0.10 * oa_fit
+        + 0.10 * publisher_risk.fit
     )
     strategy_score = _strategy_mix(
         strategy,
@@ -324,6 +338,10 @@ def score_suitability(
         strategy_score = min(strategy_score, 0.40)
     elif article_type_fit < 0.70:
         strategy_score = min(strategy_score, 0.52)
+    if publisher_risk.label == "hijacked_or_identity_risk":
+        strategy_score = 0.0
+    elif publisher_risk.label == "potential_predatory_match":
+        strategy_score = min(strategy_score, 0.15)
     return Suitability(
         score=max(0.0, min(1.0, suitability_score)),
         strategy_score=max(0.0, min(1.0, strategy_score)),
@@ -331,6 +349,9 @@ def score_suitability(
         article_type_fit=article_type_fit,
         cost_fit=cost_fit,
         oa_fit=oa_fit,
+        publisher_integrity_fit=publisher_risk.fit,
+        publisher_risk_label=publisher_risk.label,
+        publisher_risk_reasons=publisher_risk.reasons,
         risk_label=_risk_label(reasons, article_type_fit, strategy_score),
         risk_reasons=tuple(reasons),
         profile=profile,

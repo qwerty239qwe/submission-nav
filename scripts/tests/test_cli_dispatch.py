@@ -53,6 +53,15 @@ def test_cli_rules_from_file(tmp_path, tmp_config_dir, capsys):
     assert payload["abstract_limit"] == 250
 
 
+def test_cli_doctor_reports_publisher_risk_path(tmp_config_dir, capsys):
+    assert main(["doctor"]) == 0
+    out = capsys.readouterr().out
+    payload_text = out.split("\nOK doctor", 1)[0]
+    payload = json.loads(payload_text)
+    assert payload["publisher_risk_path"].endswith("publisher_risk.json")
+    assert payload["publisher_risk_configured"] is False
+
+
 @respx.mock
 def test_cli_strategist_runs_chained_workflow(tmp_path, tmp_config_dir, monkeypatch, capsys):
     monkeypatch.delenv("ELSEVIER_API_KEY", raising=False)

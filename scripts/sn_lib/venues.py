@@ -391,6 +391,8 @@ def search_venues(query: str, per_page: int = 25, venue_types: tuple[str, ...] =
         if h.is_oa and h.apc_usd is None and h.issn:
             d = enrich_doaj(h.issn)
             if d:
+                if "doaj" not in h.source.split("+"):
+                    h.source = f"{h.source}+doaj"
                 bib = d.get("bibjson", {})
                 apc = (bib.get("apc") or {}).get("max") or []
                 if apc:

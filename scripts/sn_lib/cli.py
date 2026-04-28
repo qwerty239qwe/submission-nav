@@ -289,8 +289,10 @@ def _probe_dep(name: str) -> bool:
 
 def _cmd_doctor(args) -> int:
     import os
+    from .publisher_risk import RISK_FILENAME
 
     cfg = Config.load()
+    publisher_risk_path = cfg.config_dir / RISK_FILENAME
     deps = {name: _probe_dep(name) for name in
             ("httpx", "fitz", "docx", "PIL", "pydantic", "rapidfuzz")}
     payload = {
@@ -299,6 +301,8 @@ def _cmd_doctor(args) -> int:
         "config_dir": str(cfg.config_dir),
         "cache_dir": str(cfg.cache_dir),
         "rules_dir": str(cfg.rules_dir),
+        "publisher_risk_path": str(publisher_risk_path),
+        "publisher_risk_configured": publisher_risk_path.exists(),
         "writable_config": os.access(cfg.config_dir, os.W_OK),
         "writable_cache": os.access(cfg.cache_dir, os.W_OK),
         "deps": deps,

@@ -34,6 +34,8 @@ class Ranked:
             "risk_label": self.rationale.get("risk_label"),
             "risk_reasons": self.rationale.get("risk_reasons", []),
             "article_type_fit": self.rationale.get("article_type_fit"),
+            "publisher_risk_label": self.rationale.get("publisher_risk_label"),
+            "publisher_risk_reasons": self.rationale.get("publisher_risk_reasons", []),
             "rationale": self.rationale,
         }
 
@@ -145,6 +147,9 @@ def rank_venues(
             "article_type_fit": suitability_payload["article_type_fit"],
             "cost_fit": suitability_payload["cost_fit"],
             "oa_fit": suitability_payload["oa_fit"],
+            "publisher_integrity_fit": suitability_payload["publisher_integrity_fit"],
+            "publisher_risk_label": suitability_payload["publisher_risk_label"],
+            "publisher_risk_reasons": suitability_payload["publisher_risk_reasons"],
             "risk_label": suitability_payload["risk_label"],
             "risk_reasons": suitability_payload["risk_reasons"],
             "manuscript_profile": suitability_payload["profile"],

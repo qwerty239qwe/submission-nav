@@ -98,7 +98,7 @@ def test_search_venues_uses_configured_keys(monkeypatch, tmp_config_dir):
     assert len(hits) == 1
     assert hits[0].impact_proxy == 2.7
     assert hits[0].apc_usd == 1500
-    assert hits[0].source == "openalex-works+openalex+scopus+crossref"
+    assert hits[0].source == "openalex-works+openalex+scopus+doaj+crossref"
     assert "Widget optimization" in hits[0].concepts
     assert hits[0].publisher == "Elsevier"
     assert scopus_route.calls[0].request.headers["X-ELS-APIKey"] == "SCOPUS-KEY"
@@ -180,7 +180,7 @@ def test_search_venues_falls_back_to_work_sources(tmp_config_dir, monkeypatch):
     respx.get("https://api.elsevier.com/content/serial/title").mock(
         return_value=httpx.Response(404, json={"service-error": {"status": {"statusCode": "NOT_FOUND"}}})
     )
-    hits = search_venues("mitochondrial toxicity machine learning", per_page=5)
+    hits = search_venues("compound toxicity machine learning", per_page=5)
     assert len(hits) == 1
     assert hits[0].name == "Computational Toxicology"
     assert "Computational toxicology" in hits[0].concepts
