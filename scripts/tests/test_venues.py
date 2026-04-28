@@ -108,6 +108,43 @@ def test_search_venues_uses_configured_keys(monkeypatch, tmp_config_dir):
 
 
 @respx.mock
+def test_search_venues_uses_configured_contact_emails(tmp_config_dir, monkeypatch):
+    monkeypatch.setattr("sn_lib.config._dotenv_path", lambda: tmp_config_dir / ".env")
+    monkeypatch.delenv("ELSEVIER_API_KEY", raising=False)
+    monkeypatch.delenv("SCOPUS_KEY", raising=False)
+    monkeypatch.delenv("DOAJ_KEY", raising=False)
+    monkeypatch.delenv("OPENALEX_EMAIL", raising=False)
+    monkeypatch.delenv("OPENALEX_MAILTO", raising=False)
+    monkeypatch.delenv("CROSSREF_EMAIL", raising=False)
+    cfg = Config.load()
+    cfg.openalex_email = "openalex@example.org"
+    cfg.crossref_email = "crossref@example.org"
+    cfg.save()
+
+    works_route = respx.get("https://api.openalex.org/works").mock(
+        return_value=httpx.Response(200, json={"results": []})
+    )
+    sources_route = respx.get("https://api.openalex.org/sources").mock(
+        return_value=httpx.Response(200, json={"results": [
+            {"id": "S2", "display_name": "Journal of Crossref Widgets",
+             "issn_l": "9876-5432", "is_oa": False,
+             "type": "journal", "summary_stats": {}, "apc_usd": None,
+             "host_organization_name": None, "x_concepts": []}
+        ]})
+    )
+    crossref_route = respx.get("https://api.crossref.org/journals/9876-5432").mock(
+        return_value=httpx.Response(200, json={"message": {"title": "Journal of Crossref Widgets"}})
+    )
+
+    hits = search_venues("widgets", per_page=5)
+
+    assert len(hits) == 1
+    assert works_route.calls[0].request.url.params["mailto"] == "openalex@example.org"
+    assert sources_route.calls[0].request.url.params["mailto"] == "openalex@example.org"
+    assert crossref_route.calls[0].request.url.params["mailto"] == "crossref@example.org"
+
+
+@respx.mock
 def test_search_venues_falls_back_to_work_sources(tmp_config_dir, monkeypatch):
     monkeypatch.delenv("ELSEVIER_API_KEY", raising=False)
     monkeypatch.delenv("SCOPUS_KEY", raising=False)

@@ -1,57 +1,51 @@
 ---
 name: submission-nav
-description: Academic submission navigation toolkit for manuscript journal or venue targeting, journal author-rule fetching, format checking, pre-submission revision planning, review-response strategy, and response-letter drafting. Use when a user wants submission recommendations, journal guidelines, manuscript compliance checks, or submission/revision workflow support.
+description: Academic submission navigation toolkit for manuscript venue targeting, journal author-rule fetching, format checks, pre-submission revision planning, reviewer-comment triage, and response-letter drafting.
 ---
 
 # submission-nav
 
-Use this skill as the npx-installable, self-contained entry point for the submission-nav toolkit.
+Use this as the npx-installable entry point for the submission-nav toolkit. The directory containing this file is `SN_HOME`; resolve bundled commands relative to it, not the user's current project.
 
-The directory containing this `SKILL.md` is `SN_HOME`. Resolve all bundled helper commands relative to `SN_HOME`, not the user's current project directory.
+## Command Surface
 
-## Setup Check
-
-Before running helper commands:
-
-```bash
-uv run --project "<SN_HOME>/scripts" python -m sn_lib.config show
-```
-
-If dependencies are missing, run the bundled setup script:
+Prefer the canonical CLI:
 
 ```bash
 # Windows
-powershell -ExecutionPolicy Bypass -File "<SN_HOME>/bin/install.ps1"
+"<SN_HOME>/bin/sn.cmd" doctor
 
 # macOS / Linux
-bash "<SN_HOME>/bin/install.sh"
+"<SN_HOME>/bin/sn" doctor
 ```
 
-For API credentials, use the `sn-config` workflow or edit the repo-local `.env` based on `<SN_HOME>/.env.example`. Do not print secrets.
+If `sn` is already on `PATH`, use `sn <command>` directly. Key commands are:
+
+- `sn strategist <manuscript>` for ranked journal or conference recommendations
+- `sn rules <journal> <url>` for cached author-instruction extraction
+- `sn check <manuscript> --journal <slug>` for format checks against cached rules
+- `sn parse <manuscript>` and `sn concepts <manuscript>` for reusable manuscript metadata
+- `sn triage <comments-file>` for structured reviewer-comment triage
+- `sn config show|set` for local credentials
+- `sn runs ls|path|clean` for cached workflow outputs
+
+For API credentials, use `sn-config` or edit the repo-local `.env` from `<SN_HOME>/.env.example`. Never print secrets.
 
 ## Workflows
 
 Use the specialized workflow files under `<SN_HOME>/skills/`:
 
-- Journal or venue recommendations: read `<SN_HOME>/skills/submission-strategist/SKILL.md`
-- Journal author instructions and cached rules: read `<SN_HOME>/skills/journal-rules/SKILL.md`
-- Format checks against cached journal rules: read `<SN_HOME>/skills/format-checker/SKILL.md`
-- Pre-submission revision planning: read `<SN_HOME>/skills/pre-submission-revision/SKILL.md`
-- Reviewer-comment triage: read `<SN_HOME>/skills/review-revision-strategist/SKILL.md`
-- Response-letter drafting: read `<SN_HOME>/skills/response-letter-drafter/SKILL.md`
-- Credential setup: read `<SN_HOME>/skills/sn-config/SKILL.md`
-
-When those workflow files show commands using `scripts`, rewrite them to use `<SN_HOME>/scripts`.
-
-Example:
-
-```bash
-uv run --project "<SN_HOME>/scripts" python -m sn_lib.parse "<manuscript>" --out "<tmp>/ms_full.json" --summary-out "<tmp>/ms_summary.json"
-```
+- Journal or venue recommendations: `skills/submission-strategist/SKILL.md`
+- Journal author instructions and cached rules: `skills/journal-rules/SKILL.md`
+- Format checks: `skills/format-checker/SKILL.md`
+- Pre-submission revision planning: `skills/pre-submission-revision/SKILL.md`
+- Reviewer-comment triage: `skills/review-revision-strategist/SKILL.md`
+- Response-letter drafting: `skills/response-letter-drafter/SKILL.md`
+- Credential setup: `skills/sn-config/SKILL.md`
 
 ## Output Rules
 
-- Keep generated working files in a user-provided directory or a temp directory, not inside `SN_HOME`.
-- Use cached journal rules when available and say when live publisher pages are blocked.
+- Keep generated working files in the run cache or a user-provided temp directory, not inside `SN_HOME`.
+- Reuse cached run outputs and cached journal rules when appropriate; use `--force` or `--refresh` only when the user asks for a fresh run.
 - Do not fabricate journal limits, APCs, indexing status, or author-rule details.
 - For venue recommendations, report the strategy used and keep raw score/risk reasons available for audit.

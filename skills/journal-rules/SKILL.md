@@ -5,48 +5,43 @@ description: Use when the user names one or more target journals and wants autho
 
 # journal-rules
 
-This skill fetches and summarizes author-instruction pages for target journals, then caches structured rule data locally.
+This skill fetches and caches structured author-instruction rules for target journals.
 
-It is written to work across agent hosts that support reusable skill instructions and local command execution.
+## Inputs
 
-## When to use
-
-Use this skill when the user:
-- asks for author guidelines for a journal
-- wants word or abstract limits
-- wants figure, file-format, or reference-style requirements
-- wants to compare submission constraints across multiple journals
-
-## Required inputs
-
+Required:
 - one or more journal names
 
-## Optional inputs
+Optional:
+- direct author-guidelines URL
+- saved local HTML file from a publisher page
 
-- direct author-guidelines URLs supplied by the user
-
-If the user did not name a journal:
-- ask them to choose from the current ranked list, if available
-- otherwise ask them to provide journal names directly
+If the journal is missing, ask the user to choose from the current ranked list or provide names directly.
 
 ## Procedure
 
-1. Resolve an author-guidelines URL for each journal.
+1. Resolve the author-guidelines URL.
 - Prefer a URL supplied by the user.
-- Otherwise, look up a likely journal homepage or metadata source.
-- Do not silently guess a final author-guidelines URL. Confirm it with the user before fetching if the URL is uncertain.
+- If the URL is uncertain, say so before fetching.
+- Do not silently invent a final author-guidelines URL.
 
-2. Fetch and extract structured rules:
+2. Fetch and extract rules:
 
 ```bash
-uv run --project scripts python -m sn_lib.rules "<journal-name>" "<guidelines-url>" > "<config_dir>/rules/<slug>.json"
+sn rules "<journal-name>" "<guidelines-url>"
 ```
 
-3. Read the saved JSON and summarize the fields most relevant to manuscript preparation.
+For a saved HTML file:
 
-4. If the user supplied multiple journals, compare them side by side.
+```bash
+sn rules "<journal-name>" --from-file "<page.html>"
+```
 
-## Output requirements
+Use `--refresh` only when the user asks for a fresh fetch or the cached result looks stale.
+
+3. Read the saved JSON under the rules cache and summarize the detected fields.
+
+## Output
 
 For each journal, report:
 - word limit
@@ -56,27 +51,10 @@ For each journal, report:
 - reference style
 - reference limit
 
-If extraction is uncertain, include a small number of raw excerpts or direct notes from the fetched content.
+If a value is missing, say `not detected`. If extraction is uncertain, say whether the value came from a heuristic extraction or a clearly labeled rule.
 
-If the user asked about multiple journals, return a comparison table highlighting the most restrictive requirements.
+For multiple journals, return a compact comparison table focused on the most restrictive constraints.
 
-## Reliability rules
+## Handoff
 
-- If a field is missing, say `not detected`
-- Do not hallucinate numeric limits
-- Make clear when a value came from heuristic extraction rather than a clearly labeled rule on the source page
-
-## Caching
-
-- Save each journal's structured rules JSON under `<config_dir>/rules/`
-- Reuse cached rule files when appropriate, but refresh them if the user asks or if the existing data looks stale
-
-## Handoff to other skills
-
-Use `format-checker` after rules have been cached and the target journal is known.
-
-## Manual verification
-
-```bash
-uv run --project scripts python -m sn_lib.rules "<journal-name>" "<guidelines-url>"
-```
+Use `format-checker` after the target journal rules have been cached.

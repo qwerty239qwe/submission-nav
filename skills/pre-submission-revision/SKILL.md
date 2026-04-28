@@ -34,8 +34,10 @@ Use this skill when the user:
 1. Parse the manuscript:
 
 ```bash
-uv run --project scripts python -m sn_lib.parse "<path-to-manuscript>" > "<temp_dir>/sn_ms.json"
+sn parse "<path-to-manuscript>"
 ```
+
+Use `sn runs path "<path-to-manuscript>"` to locate the saved manuscript summary if needed.
 
 2. If the target journal is known, use `journal-rules` first.
 3. If venue selection is still open, use `submission-strategist` first.

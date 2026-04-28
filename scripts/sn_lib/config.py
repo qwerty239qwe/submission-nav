@@ -10,6 +10,8 @@ KEY_ALIASES = {
     "elsevier_api_key": "scopus_key",
     "scopus_key": "scopus_key",
     "doaj_key": "doaj_key",
+    "openalex_email": "openalex_email",
+    "crossref_email": "crossref_email",
 }
 
 def _config_dir() -> Path:
@@ -57,6 +59,10 @@ def _dotenv_key_name(name: str) -> str | None:
         return "ELSEVIER_API_KEY"
     if canonical == "doaj_key":
         return "DOAJ_KEY"
+    if canonical == "openalex_email":
+        return "OPENALEX_EMAIL"
+    if canonical == "crossref_email":
+        return "CROSSREF_EMAIL"
     return None
 
 
@@ -85,6 +91,8 @@ def _write_dotenv_value(name: str, value: str) -> None:
 class Config:
     scopus_key: str | None = None
     doaj_key: str | None = None
+    openalex_email: str | None = None
+    crossref_email: str | None = None
     config_dir: Path = field(default_factory=_config_dir)
 
     @property
@@ -120,6 +128,8 @@ class Config:
         return cls(
             scopus_key=data.get("scopus_key"),
             doaj_key=data.get("doaj_key"),
+            openalex_email=data.get("openalex_email"),
+            crossref_email=data.get("crossref_email"),
             config_dir=cdir,
         )
 
@@ -168,6 +178,8 @@ def _main():
         safe = {
             "scopus_key": _masked(cfg.scopus_key),
             "doaj_key": _masked(cfg.doaj_key),
+            "openalex_email": cfg.openalex_email,
+            "crossref_email": cfg.crossref_email,
         }
         env_override = _env_key_overrides()
         print(_json.dumps({

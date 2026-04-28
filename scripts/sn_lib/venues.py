@@ -1,6 +1,5 @@
 from __future__ import annotations
 import httpx
-import os
 import time
 from dataclasses import dataclass, asdict
 from rapidfuzz import fuzz
@@ -76,7 +75,7 @@ def _throttle_elsevier() -> None:
 
 def search_openalex(query: str, per_page: int = 25, venue_types: tuple[str, ...] = ("journal",)) -> list[VenueHit]:
     params = {"search": query, "per-page": per_page, "filter": f"type:{_type_filter(venue_types)}"}
-    openalex_mailto = os.getenv("OPENALEX_EMAIL") or os.getenv("OPENALEX_MAILTO")
+    openalex_mailto = Config.load().key("openalex_email")
     if openalex_mailto:
         params["mailto"] = openalex_mailto
     data = _get(OPENALEX_SOURCES, params)
@@ -115,7 +114,7 @@ def search_openalex_by_works(query: str, per_page: int = 50, venue_types: tuple[
         "filter": f"primary_location.source.type:{_type_filter(venue_types)}",
         "per-page": min(per_page, 200),
     }
-    openalex_mailto = os.getenv("OPENALEX_EMAIL") or os.getenv("OPENALEX_MAILTO")
+    openalex_mailto = Config.load().key("openalex_email")
     if openalex_mailto:
         params["mailto"] = openalex_mailto
     try:
@@ -287,7 +286,7 @@ def enrich_crossref(issn: str) -> dict | None:
     if not issn:
         return None
     params: dict[str, str] = {}
-    crossref_email = os.getenv("CROSSREF_EMAIL")
+    crossref_email = Config.load().key("crossref_email")
     if crossref_email:
         params["mailto"] = crossref_email
     try:

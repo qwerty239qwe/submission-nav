@@ -10,10 +10,14 @@ def test_save_and_reload_roundtrip(tmp_config_dir):
     cfg = Config.load()
     cfg.scopus_key = "SECRET"
     cfg.doaj_key = "DOAJ-KEY"
+    cfg.openalex_email = "openalex@example.org"
+    cfg.crossref_email = "crossref@example.org"
     cfg.save()
     again = Config.load()
     assert again.scopus_key == "SECRET"
     assert again.doaj_key == "DOAJ-KEY"
+    assert again.openalex_email == "openalex@example.org"
+    assert again.crossref_email == "crossref@example.org"
 
 def test_cache_dir_created(tmp_config_dir):
     cfg = Config.load()
@@ -48,6 +52,10 @@ def test_write_dotenv_value(monkeypatch, tmp_path):
     monkeypatch.setattr("sn_lib.config.__file__", str(fake_file))
     _write_dotenv_value("scopus_key", "ABC123")
     _write_dotenv_value("doaj_key", "DOAJ456")
+    _write_dotenv_value("openalex_email", "openalex@example.org")
+    _write_dotenv_value("crossref_email", "crossref@example.org")
     values = _dotenv()
     assert values["ELSEVIER_API_KEY"] == "ABC123"
     assert values["DOAJ_KEY"] == "DOAJ456"
+    assert values["OPENALEX_EMAIL"] == "openalex@example.org"
+    assert values["CROSSREF_EMAIL"] == "crossref@example.org"

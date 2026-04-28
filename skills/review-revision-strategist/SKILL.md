@@ -41,13 +41,13 @@ One or more of:
 2. Build the structured comment list:
 
 ```bash
-uv run --project scripts python -m sn_lib.revision "<temp_dir>/sn_reviews.txt" > "<temp_dir>/sn_rev.json"
+sn triage "<temp_dir>/sn_reviews.txt"
 ```
 
 3. If manuscript context is available, parse it:
 
 ```bash
-uv run --project scripts python -m sn_lib.parse "<path-to-manuscript>" > "<temp_dir>/sn_ms.json"
+sn parse "<path-to-manuscript>"
 ```
 
 ## Procedure

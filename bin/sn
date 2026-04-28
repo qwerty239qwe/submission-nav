@@ -1,0 +1,4 @@
+#!/usr/bin/env sh
+set -eu
+SN_HOME="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
+exec uv run --project "$SN_HOME/scripts" sn "$@"

@@ -32,13 +32,13 @@ Use this skill when the user:
 1. If starting from raw reviewer comments, build the comment structure:
 
 ```bash
-uv run --project scripts python -m sn_lib.revision "<path-to-review-comments>" > "<temp_dir>/sn_rev.json"
+sn triage "<path-to-review-comments>"
 ```
 
 2. If manuscript context is needed, parse it:
 
 ```bash
-uv run --project scripts python -m sn_lib.parse "<path-to-manuscript>" > "<temp_dir>/sn_ms.json"
+sn parse "<path-to-manuscript>"
 ```
 
 3. If no revision strategy exists yet, run `review-revision-strategist` first.

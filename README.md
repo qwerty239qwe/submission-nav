@@ -64,7 +64,13 @@ The setup script prepares the local helper runtime for the skills. Users should 
 
 ## First Use
 
-After installing, ask your agent to use `submission-nav` and run the setup check. Then use the `sn-config` workflow to save optional credentials in the installed skill's repo-local `.env`.
+After installing, ask your agent to use `submission-nav` and run:
+
+```bash
+sn doctor
+```
+
+Then use the `sn-config` workflow to save optional credentials in the installed skill's repo-local `.env`.
 
 Supported environment variables:
 
@@ -78,6 +84,15 @@ An example file is included at [`.env.example`](.env.example).
 ## How It Works
 
 The skills call local helper commands to parse manuscripts, retrieve venue metadata, cache journal rules, and run format checks. That runtime is an implementation detail of the plugin and should not normally matter to end users.
+
+For direct local use, the main commands are:
+
+```bash
+sn strategist manuscript.docx --strategy balanced
+sn rules "PLOS ONE" "https://journals.plos.org/plosone/s/submission-guidelines"
+sn check manuscript.pdf --journal plos-one
+sn runs ls
+```
 
 ## Data sources
 

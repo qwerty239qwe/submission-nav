@@ -20,14 +20,14 @@ Use this skill when the user:
 
 Before running this skill:
 
-1. A rules JSON file must exist under `<config_dir>/rules/`
+1. A rules JSON file must exist under the submission-nav rules cache.
 - If not, run `journal-rules` first.
 
 2. A parsed manuscript JSON or a manuscript source file must be available
 - If not, run:
 
 ```bash
-uv run --project scripts python -m sn_lib.parse "<path-to-manuscript>"
+sn parse "<path-to-manuscript>"
 ```
 
 ## Required inputs
@@ -45,12 +45,12 @@ uv run --project scripts python -m sn_lib.parse "<path-to-manuscript>"
 1. Confirm which journal rules file should be used.
 - If multiple cached rules files exist, ask the user to choose.
 
-2. Determine the manuscript word count from the parsed manuscript JSON.
+2. Let the helper parse the manuscript and determine word count.
 
 3. Run the figure and format check:
 
 ```bash
-uv run --project scripts python -m sn_lib.figures "<pdf-path>" --rules-json "<config_dir>/rules/<slug>.json" --word-count <N> > "<temp_dir>/sn_check_<slug>.json"
+sn check "<pdf-path>" --journal "<slug>"
 ```
 
 4. Read the generated JSON and classify results into:
@@ -86,5 +86,5 @@ If missing rules block the check, run `journal-rules` first and then retry.
 ## Manual verification
 
 ```bash
-uv run --project scripts python -m sn_lib.figures "<pdf-path>" --rules-json "<config_dir>/rules/<slug>.json" --word-count <N>
+sn check "<pdf-path>" --journal "<slug>"
 ```

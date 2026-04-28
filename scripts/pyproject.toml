@@ -25,6 +25,9 @@ dev = [
 [tool.uv]
 package = true
 
+[project.scripts]
+sn = "sn_lib.cli:main"
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
