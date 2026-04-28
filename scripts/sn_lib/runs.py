@@ -20,6 +20,8 @@ class RunPaths:
     ms_summary: Path
     concepts: Path
     profile: Path
+    specialty_queries: Path
+    specialty_venues: Path
 
 
 def _hash_path(path: Path) -> str:
@@ -54,6 +56,8 @@ def paths_for(ms_path: str | Path | None = None, run_dir: str | Path | None = No
         ms_summary=root / "ms_summary.json",
         concepts=root / "concepts.json",
         profile=root / "ms_profile.json",
+        specialty_queries=root / "specialty_queries.json",
+        specialty_venues=root / "specialty_venues.json",
     )
 
 

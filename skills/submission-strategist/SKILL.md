@@ -38,20 +38,28 @@ sn strategist "<manuscript>" --strategy broad --venue-types conference --agent-t
 
 2. Read the compact ranked summary path printed by the command. Use the full ranked JSON only when the compact summary looks thin or the user asks for a broader candidate set.
 
-3. Use the bucketed output as the primary decision structure. The chained workflow writes a manuscript profile (`ms_profile.json`) and bucketed ranked summaries (`ranked_agent_<strategy>.json` and `ranked_buckets_<strategy>.json`) with:
+3. Use the specialty-expanded candidate pool before judging results. The chained workflow writes:
+- `ms_profile.json`: manuscript profile used for article-type and scope gates
+- `specialty_queries.json`: detected specialty domains, added search queries, and seed journals
+- `specialty_venues.json`: high-recall specialty seed venues that enter ranking even if API keyword search misses them
+- `ranked_agent_<strategy>.json` and `ranked_buckets_<strategy>.json`: final bucketed recommendations
+
+Inspect `specialty_queries.json` if the final venues look generic. If obvious field journals are missing, rerun with `--strategy broad` or broaden the manuscript-specific query.
+
+4. Use the bucketed output as the primary decision structure:
 - `stretch`: plausible higher-impact options
 - `target`: strongest balance of fit and suitability
 - `safe`: lower-risk fallbacks
 - `fallback`: weak-score or caution cases
 - `avoid`: article-type, scope, or publisher-integrity mismatches
 
-4. Screen obvious article-type mismatches before presenting results:
+5. Screen obvious article-type mismatches before presenting results:
 - review journals for original research
 - method journals for papers without a new method
 - data/resource journals for non-resource papers
 - elite broad-scope journals when the manuscript lacks correspondingly broad novelty
 
-5. Present a decision-oriented result.
+6. Present a decision-oriented result.
 
 ## Output
 
@@ -77,7 +85,7 @@ Recommended table columns:
 ## Failure Handling
 
 - If parsing fails, ask for a cleaner PDF or original DOCX.
-- If venue retrieval is weak, rerun once with `--strategy broad` or broader concepts.
+- If venue retrieval is weak, first inspect `specialty_queries.json`, then rerun once with `--strategy broad` or broader concepts.
 - If the user wants CS targeting, use `--venue-types conference` or `journal conference`.
 - If external data sources fail, say which sources failed and continue with available evidence.
 - Do not fabricate APCs, journal policies, indexing status, or acceptance likelihood.

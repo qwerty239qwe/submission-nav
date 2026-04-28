@@ -37,6 +37,8 @@ class VenueHit:
     dblp_acronym: str | None = None
     dblp_url: str | None = None
     dblp_type: str | None = None
+    specialty_domain: str | None = None
+    specialty_confidence: float | None = None
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -167,15 +169,36 @@ def search_openalex_by_works(query: str, per_page: int = 50, venue_types: tuple[
     return [VenueHit(**row) for row in grouped.values()]
 
 
+def _hit_key(hit: VenueHit) -> str:
+    if hit.issn:
+        return f"issn:{hit.issn.casefold()}"
+    if hit.name:
+        return f"name:{hit.name.casefold().strip()}"
+    return f"id:{hit.id}"
+
+
+def _hit_keys(hit: VenueHit) -> list[str]:
+    keys = []
+    if hit.issn:
+        keys.append(f"issn:{hit.issn.casefold()}")
+    if hit.name:
+        keys.append(f"name:{hit.name.casefold().strip()}")
+    if hit.id:
+        keys.append(f"id:{hit.id}")
+    return keys
+
+
 def _merge_hits(primary: list[VenueHit], secondary: list[VenueHit]) -> list[VenueHit]:
     merged: dict[str, VenueHit] = {}
     for hit in primary + secondary:
-        key = hit.id or hit.issn or hit.name
-        if not key:
+        keys = _hit_keys(hit)
+        if not keys:
             continue
-        existing = merged.get(key)
+        existing = next((merged[key] for key in keys if key in merged), None)
+        key = keys[0]
         if existing is None:
-            merged[key] = hit
+            for alias in keys:
+                merged[alias] = hit
             continue
         existing.name = existing.name or hit.name
         existing.issn = existing.issn or hit.issn
@@ -188,14 +211,22 @@ def _merge_hits(primary: list[VenueHit], secondary: list[VenueHit]) -> list[Venu
         existing.dblp_acronym = existing.dblp_acronym or hit.dblp_acronym
         existing.dblp_url = existing.dblp_url or hit.dblp_url
         existing.dblp_type = existing.dblp_type or hit.dblp_type
+        if (hit.specialty_confidence or 0.0) > (existing.specialty_confidence or 0.0):
+            existing.specialty_domain = hit.specialty_domain
+            existing.specialty_confidence = hit.specialty_confidence
         for concept in hit.concepts:
             if concept and concept not in existing.concepts:
                 existing.concepts.append(concept)
         existing.evidence_count += hit.evidence_count
-        if hit.source not in existing.source.split("+"):
-            existing.source = f"{existing.source}+{hit.source}"
+        source_parts = [part for part in existing.source.split("+") if part]
+        for part in hit.source.split("+"):
+            if part and part not in source_parts:
+                source_parts.append(part)
+        existing.source = "+".join(source_parts)
+        for alias in keys:
+            merged[alias] = existing
     return sorted(
-        merged.values(),
+        {id(hit): hit for hit in merged.values()}.values(),
         key=lambda h: (h.evidence_count, h.impact_proxy or 0.0, h.h_index or 0),
         reverse=True,
     )

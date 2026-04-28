@@ -166,11 +166,11 @@ def _scope_mismatch_adjustment(profile: ManuscriptProfile, venue: VenueHit, scop
         "physical sciences", "materials science", "materials chemistry", "physics",
         "spectroscopy", "optical engineering", "remote-sensing", "ecology",
         "environmental dna", "food", "topic modeling", "natural language processing",
-        "information processing",
+        "information processing", "geography", "social sciences",
     )
     off_scope_name_terms = (
         "computer physics", "information processing", "optical engineering",
-        "proceedings of spie", "spie",
+        "proceedings of spie", "spie", "geography",
     )
     if _has_phrase(name, off_scope_name_terms) and not _has_phrase(name, biomedical_terms):
         return min(scope_fit, 0.35), ["venue appears outside the manuscript's biomedical/genomic scope"]
@@ -338,6 +338,8 @@ def score_suitability(
         strategy_score = min(strategy_score, 0.40)
     elif article_type_fit < 0.70:
         strategy_score = min(strategy_score, 0.52)
+    if scope_reasons:
+        strategy_score = min(strategy_score, 0.46)
     if publisher_risk.label == "hijacked_or_identity_risk":
         strategy_score = 0.0
     elif publisher_risk.label == "potential_predatory_match":

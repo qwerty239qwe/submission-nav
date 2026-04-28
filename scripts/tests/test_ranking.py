@@ -172,6 +172,19 @@ def test_biomedical_manuscript_penalizes_physical_science_ml_venue():
     assert any("outside the manuscript" in reason for reason in ranked[1].rationale["risk_reasons"])
 
 
+def test_biomedical_manuscript_penalizes_social_geography_venue():
+    off_scope = _v("Social & Cultural Geography", ["geography", "social sciences"], 2.0)
+    target = _v("BMC Medical Genomics", ["medical genomics", "transcriptomics"], 2.0, oa=True)
+    ranked = rank_venues(
+        ["mitochondrial disease", "RNA sequencing", "machine learning"],
+        [off_scope, target],
+        ms_title="Machine Learning-based Prediction of Mitochondrial Disease from Whole-Blood RNA Sequencing Data",
+        ms_abstract="We analyzed patient RNA sequencing data and trained machine learning classifiers.",
+    )
+    assert ranked[0].venue.name == "BMC Medical Genomics"
+    assert ranked[1].rationale["scope_fit"] <= 0.35
+
+
 def test_biomedical_manuscript_penalizes_broad_engineering_proceedings():
     off_scope = _v("Proceedings of SPIE, the International Society for Optical Engineering", ["medical imaging", "physical sciences"], 1.0)
     target = _v("Clinical Genetics", ["genetic disorders", "molecular diagnosis"], 3.0)

@@ -123,6 +123,35 @@ def _ensure_profile(args) -> Path:
     return run.run_dir
 
 
+def _cmd_specialty(args) -> int:
+    from .specialty import build_specialty_plan, seed_venues_from_plan
+
+    _ensure_profile(args)
+    run = paths_for(args.manuscript, args.run_dir)
+    outputs = [run.specialty_queries, run.specialty_venues]
+    inputs = [run.ms_summary, run.concepts, run.profile]
+    if not outputs_fresh(inputs, outputs, args.force):
+        with run_lock(run.run_dir):
+            plan = build_specialty_plan(
+                _read_json(run.ms_summary),
+                _read_json(run.profile),
+                _read_json(run.concepts),
+                broad=getattr(args, "strategy", "balanced") == "broad",
+            )
+            _write(run.specialty_queries, plan)
+            _write(run.specialty_venues, [hit.to_dict() for hit in seed_venues_from_plan(plan)])
+            update_manifest(run.run_dir, args.manuscript, "specialty", outputs)
+    _print_ok("specialty", run.specialty_queries)
+    return 0
+
+
+def _ensure_specialty(args) -> Path:
+    run = paths_for(args.manuscript, args.run_dir)
+    if not run.specialty_queries.exists() or not run.specialty_venues.exists() or args.force:
+        _cmd_specialty(args)
+    return run.run_dir
+
+
 def _cmd_venues(args) -> int:
     from .venues import search_venues
 
@@ -148,12 +177,16 @@ def _cmd_venues(args) -> int:
 
 
 def _collect_venue_files(run_dir: Path) -> list[Path]:
-    return sorted(run_dir.glob("venues_*.json"))
+    files = sorted(run_dir.glob("venues_*.json"))
+    specialty = run_dir / "specialty_venues.json"
+    if specialty.exists():
+        files.append(specialty)
+    return files
 
 
 def _cmd_rank(args) -> int:
     from .ranking import rank_venues, summarize_bucketed
-    from .venues import VenueHit
+    from .venues import VenueHit, _merge_hits
 
     _ensure_profile(args)
     run = paths_for(args.manuscript, args.run_dir)
@@ -168,15 +201,11 @@ def _cmd_rank(args) -> int:
     bucketed_out = run.run_dir / f"ranked_buckets_{suffix}.json"
     inputs = [run.concepts, run.ms_summary, run.profile, *venue_files]
     if not outputs_fresh(inputs, [ranked_out, agent_out, bucketed_out], args.force):
-        venues = []
-        seen = set()
+        loaded_venues = []
         for path in venue_files:
             for row in _read_json(path):
-                key = row.get("id") or row.get("issn") or row.get("name")
-                if key in seen:
-                    continue
-                seen.add(key)
-                venues.append(VenueHit(**row))
+                loaded_venues.append(VenueHit(**row))
+        venues = _merge_hits([], loaded_venues)
         summary = _read_json(run.ms_summary)
         ranked = rank_venues(
             concepts,
@@ -200,12 +229,24 @@ def _cmd_strategist(args) -> int:
     from .concepts import build_queries
 
     _ensure_concepts(args)
+    _ensure_specialty(args)
     run = paths_for(args.manuscript, args.run_dir)
     concepts_payload = _read_json(run.concepts)
     concepts = concepts_payload.get("concepts", [])
-    queries = concepts_payload.get("queries") or build_queries(concepts)
+    base_queries = list(concepts_payload.get("queries") or build_queries(concepts))
+    specialty_plan = _read_json(run.specialty_queries)
+    queries = base_queries[: args.max_queries]
+    for query in specialty_plan.get("queries") or []:
+        if query not in queries:
+            queries.append(query)
+        if len(queries) >= args.max_queries + args.max_specialty_queries:
+            break
+    for row in (specialty_plan.get("seed_journals") or [])[: args.max_seed_queries]:
+        journal = row.get("journal")
+        if journal and journal not in queries:
+            queries.append(journal)
     if not args.venues_json:
-        for query in queries[: args.max_queries]:
+        for query in queries:
             venue_args = argparse.Namespace(
                 query=query,
                 per_page=args.per_page,
@@ -383,6 +424,13 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--oa-preference", default="any", choices=["any", "oa-only", "avoid-oa"])
     p.set_defaults(func=_cmd_profile)
 
+    p = sub.add_parser("specialty")
+    add_common(p)
+    p.add_argument("manuscript")
+    p.add_argument("--strategy", default="balanced", choices=["balanced", "ambitious", "safe", "fast", "low-cost", "oa-only", "broad"])
+    p.add_argument("--oa-preference", default="any", choices=["any", "oa-only", "avoid-oa"])
+    p.set_defaults(func=_cmd_specialty)
+
     p = sub.add_parser("venues")
     add_common(p)
     p.add_argument("query")
@@ -414,6 +462,8 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--per-page", type=int, default=40)
     p.add_argument("--agent-top-n", type=int, default=12)
     p.add_argument("--max-queries", type=int, default=4)
+    p.add_argument("--max-specialty-queries", type=int, default=3)
+    p.add_argument("--max-seed-queries", type=int, default=5)
     p.add_argument("--venues-json", nargs="*", default=[])
     p.set_defaults(func=_cmd_strategist)
 

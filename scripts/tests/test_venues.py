@@ -1,6 +1,6 @@
 import respx, httpx
 from sn_lib.config import Config
-from sn_lib.venues import search_dblp_venues, search_openalex, search_venues, VenueHit
+from sn_lib.venues import search_dblp_venues, search_openalex, search_venues, VenueHit, _merge_hits
 
 @respx.mock
 def test_search_openalex_parses_hits(tmp_config_dir, monkeypatch):
@@ -185,6 +185,39 @@ def test_search_venues_falls_back_to_work_sources(tmp_config_dir, monkeypatch):
     assert hits[0].name == "Computational Toxicology"
     assert "Computational toxicology" in hits[0].concepts
     assert hits[0].evidence_count == 1
+
+
+def test_merge_hits_combines_exact_name_specialty_seed_with_metadata():
+    seed = VenueHit(
+        id="specialty:mitochondrion",
+        name="Mitochondrion",
+        issn=None,
+        publisher=None,
+        is_oa=None,
+        apc_usd=None,
+        impact_proxy=None,
+        h_index=None,
+        concepts=["mitochondrial disease"],
+        source="specialty-seed",
+        specialty_domain="mitochondrial_disease",
+        specialty_confidence=0.96,
+    )
+    metadata = VenueHit(
+        id="https://openalex.org/S123",
+        name="Mitochondrion",
+        issn="1567-7249",
+        publisher="Elsevier BV",
+        is_oa=False,
+        apc_usd=None,
+        impact_proxy=4.0,
+        h_index=80,
+        concepts=["mitochondria"],
+        source="openalex",
+    )
+    merged = _merge_hits([metadata], [seed])
+    assert len(merged) == 1
+    assert merged[0].publisher == "Elsevier BV"
+    assert merged[0].specialty_domain == "mitochondrial_disease"
 
 
 @respx.mock

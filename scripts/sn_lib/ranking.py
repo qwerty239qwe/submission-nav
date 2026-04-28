@@ -36,6 +36,8 @@ class Ranked:
             "article_type_fit": self.rationale.get("article_type_fit"),
             "publisher_risk_label": self.rationale.get("publisher_risk_label"),
             "publisher_risk_reasons": self.rationale.get("publisher_risk_reasons", []),
+            "specialty_domain": self.rationale.get("specialty_domain"),
+            "specialty_fit": self.rationale.get("specialty_fit"),
             "rationale": self.rationale,
         }
 
@@ -113,13 +115,15 @@ def rank_venues(
     for v in venues:
         concept_fit = _fit(ms_concepts, v.concepts)
         text_fit = _text_fit(ms_concepts, v)
-        fit = max(concept_fit, text_fit)
+        specialty_fit = min(1.0, max(0.0, v.specialty_confidence or 0.0))
+        fit = max(concept_fit, text_fit, specialty_fit * 0.68)
         imp = _impact(v.impact_proxy)
         scoped_imp = _impact_weight(imp, fit, text_fit)
         oa = _oa_bonus(v)
         pen = _apc_penalty(v.apc_usd, apc_budget_usd)
         broad_pen = _broad_scope_penalty(v, fit, text_fit, imp)
-        raw_score = w_fit * fit + w_impact * scoped_imp + w_oa * oa - pen - broad_pen
+        specialty_bonus = 0.08 * specialty_fit
+        raw_score = w_fit * fit + w_impact * scoped_imp + w_oa * oa + specialty_bonus - pen - broad_pen
         suitability = score_suitability(
             v,
             raw_score=raw_score,
@@ -136,6 +140,9 @@ def rank_venues(
             "fit": round(fit, 3),
             "concept_fit": round(concept_fit, 3),
             "text_fit": round(text_fit, 3),
+            "specialty_fit": round(specialty_fit, 3),
+            "specialty_domain": v.specialty_domain,
+            "specialty_bonus": round(specialty_bonus, 3),
             "impact": round(scoped_imp, 3),
             "oa_bonus": round(oa, 3),
             "apc_penalty": round(pen, 3),

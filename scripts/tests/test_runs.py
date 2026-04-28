@@ -21,6 +21,8 @@ def test_paths_for_includes_profile_path(tmp_path, tmp_config_dir):
     ms = tmp_path / "paper.docx"
     ms.write_text("x", encoding="utf-8")
     assert paths_for(ms).profile.name == "ms_profile.json"
+    assert paths_for(ms).specialty_queries.name == "specialty_queries.json"
+    assert paths_for(ms).specialty_venues.name == "specialty_venues.json"
 
 
 def test_update_manifest_records_outputs(tmp_path, tmp_config_dir):
