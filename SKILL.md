@@ -1,6 +1,6 @@
 ---
 name: submission-nav
-description: Academic submission navigation toolkit for manuscript venue targeting, journal author-rule fetching, format checks, pre-submission revision planning, reviewer-comment triage, and response-letter drafting.
+description: Journal and conference venue targeting from a manuscript, plus downstream submission and revision workflows (author rules, format checks, revision planning, reviewer triage, response letters).
 ---
 
 # submission-nav

@@ -350,18 +350,3 @@ def parse_manuscript(path: str | Path) -> Manuscript:
     if suffix == ".pdf":
         return _parse_pdf(p)
     raise ValueError(f"Unsupported extension: {suffix}")
-
-def _main():
-    import argparse
-    ap = argparse.ArgumentParser()
-    ap.add_argument("path")
-    ap.add_argument("--out", help="Optional path to write JSON output.")
-    ap.add_argument("--summary-out", help="Optional path to write a compact JSON summary.")
-    args = ap.parse_args()
-    m = parse_manuscript(args.path)
-    emit_json(m.to_dict(), args.out)
-    if args.summary_out:
-        emit_json(m.to_summary_dict(), args.summary_out)
-
-if __name__ == "__main__":
-    _main()

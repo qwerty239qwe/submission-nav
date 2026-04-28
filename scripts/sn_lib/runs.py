@@ -118,18 +118,68 @@ def write_json_atomic(path: Path, payload: object) -> None:
         raise
 
 
+STALE_LOCK_SECONDS = 3600
+
+
+def _pid_alive(pid: int) -> bool:
+    if pid <= 0:
+        return False
+    if os.name == "nt":
+        import ctypes
+
+        PROCESS_QUERY_LIMITED = 0x1000
+        kernel32 = ctypes.windll.kernel32
+        handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED, False, pid)
+        if not handle:
+            return False
+        STILL_ACTIVE = 259
+        code = ctypes.c_ulong(0)
+        ok = kernel32.GetExitCodeProcess(handle, ctypes.byref(code))
+        kernel32.CloseHandle(handle)
+        return bool(ok) and code.value == STILL_ACTIVE
+    try:
+        os.kill(pid, 0)
+        return True
+    except (OSError, ProcessLookupError):
+        return False
+
+
+def _reclaim_if_stale(lock_path: Path) -> None:
+    try:
+        st = lock_path.stat()
+    except FileNotFoundError:
+        return
+    if time.time() - st.st_mtime < STALE_LOCK_SECONDS:
+        return
+    try:
+        pid = int(lock_path.read_text(encoding="utf-8").strip() or "0")
+    except (OSError, ValueError):
+        pid = 0
+    if not _pid_alive(pid):
+        try:
+            lock_path.unlink()
+        except OSError:
+            pass
+
+
 @contextmanager
 def run_lock(run_dir: Path) -> Iterator[None]:
     lock_path = run_dir / ".lock"
     lock_path.parent.mkdir(parents=True, exist_ok=True)
+    _reclaim_if_stale(lock_path)
     lock_path.touch(exist_ok=True)
     with lock_path.open("r+b") as handle:
+        handle.seek(0)
+        handle.truncate()
+        handle.write(str(os.getpid()).encode("utf-8"))
+        handle.flush()
         if os.name == "nt":
             import msvcrt
 
             deadline = time.time() + 60
             while True:
                 try:
+                    handle.seek(0)
                     msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
                     break
                 except OSError:

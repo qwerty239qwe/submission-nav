@@ -130,21 +130,3 @@ def derive_from_summary(summary: dict, max_concepts: int = 5, max_queries: int =
         "concepts": concepts,
         "queries": queries,
     }
-
-
-def _main():
-    import argparse
-
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--summary-json", required=True, help="Path to a parsed manuscript summary JSON.")
-    ap.add_argument("--out", help="Optional path to write JSON output.")
-    ap.add_argument("--max-concepts", type=int, default=5)
-    ap.add_argument("--max-queries", type=int, default=4)
-    args = ap.parse_args()
-    summary = json.loads(Path(args.summary_json).read_text(encoding="utf-8"))
-    payload = derive_from_summary(summary, max_concepts=args.max_concepts, max_queries=args.max_queries)
-    emit_json(payload, args.out)
-
-
-if __name__ == "__main__":
-    _main()

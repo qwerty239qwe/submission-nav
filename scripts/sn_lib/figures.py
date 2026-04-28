@@ -69,19 +69,3 @@ def check_against_rules(figures: list[FigureInfo], rules: JournalRules, word_cou
         if rules.figure_dpi and not f.dpi:
             res.warnings.append(f"Figure {f.index} dpi unknown; required {rules.figure_dpi}.")
     return res
-
-def _main():
-    import argparse, json
-    ap = argparse.ArgumentParser()
-    ap.add_argument("pdf")
-    ap.add_argument("--rules-json", required=True)
-    ap.add_argument("--word-count", type=int, required=True)
-    args = ap.parse_args()
-    rules_data = json.loads(open(args.rules_json, encoding="utf-8").read())
-    rules = JournalRules(**rules_data)
-    figs = extract_figures_from_pdf(args.pdf)
-    res = check_against_rules(figs, rules, args.word_count)
-    print(json.dumps({"figures": [f.to_dict() for f in figs], "check": res.to_dict()}, indent=2))
-
-if __name__ == "__main__":
-    _main()

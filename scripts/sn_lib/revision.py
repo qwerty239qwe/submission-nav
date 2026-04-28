@@ -47,16 +47,3 @@ def build_response_skeleton(items: list[dict]) -> str:
             lines.append("**Changes in manuscript:** [TODO: quote new/changed text.]")
             lines.append("")
     return "\n".join(lines)
-
-def _main():
-    import argparse, json, sys
-    ap = argparse.ArgumentParser()
-    ap.add_argument("comments_file")
-    args = ap.parse_args()
-    text = open(args.comments_file, encoding="utf-8").read()
-    items = parse_reviewer_comments(text)
-    skeleton = build_response_skeleton(items)
-    print(json.dumps({"items": items, "skeleton": skeleton}, indent=2, ensure_ascii=False))
-
-if __name__ == "__main__":
-    _main()

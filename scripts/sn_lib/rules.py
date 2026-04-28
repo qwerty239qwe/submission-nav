@@ -182,28 +182,3 @@ def fetch_rules(
     rules_cache.save(rules.to_dict(), html, url, fetch_method="httpx")
     cached = _hydrate_cached_rules(rules_cache, "fresh-fetch")
     return cached or rules
-
-
-def _main():
-    import argparse
-
-    ap = argparse.ArgumentParser()
-    ap.add_argument("journal")
-    ap.add_argument("url")
-    ap.add_argument("--out", help="Optional path to write JSON output.")
-    ap.add_argument("--refresh", action="store_true", help="Refresh cached rules from the source URL.")
-    ap.add_argument("--offline", action="store_true", help="Use only locally cached rules.")
-    ap.add_argument("--max-age-days", type=int, default=DEFAULT_MAX_AGE_DAYS, help="Maximum cache age before refresh is attempted.")
-    args = ap.parse_args()
-    r = fetch_rules(
-        args.journal,
-        args.url,
-        refresh=args.refresh,
-        offline=args.offline,
-        max_age_days=args.max_age_days,
-    )
-    emit_json(r.to_dict(), args.out)
-
-
-if __name__ == "__main__":
-    _main()

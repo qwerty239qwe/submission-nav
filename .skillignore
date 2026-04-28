@@ -1,0 +1,9 @@
+docs/
+temp_sn/
+.pytest_cache/
+**/__pycache__/
+*.pyc
+.git/
+.gitignore
+.venv/
+scripts/tests/

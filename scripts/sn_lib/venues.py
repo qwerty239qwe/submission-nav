@@ -407,17 +407,3 @@ def search_venues(query: str, per_page: int = 25, venue_types: tuple[str, ...] =
             if dblp:
                 _apply_dblp(h, dblp)
     return hits
-
-def _main():
-    import argparse
-    ap = argparse.ArgumentParser()
-    ap.add_argument("query")
-    ap.add_argument("--per-page", type=int, default=25)
-    ap.add_argument("--venue-types", nargs="+", default=["journal"], help="Venue types to search, e.g. journal conference.")
-    ap.add_argument("--out", help="Optional path to write JSON output.")
-    args = ap.parse_args()
-    hits = search_venues(args.query, per_page=args.per_page, venue_types=tuple(args.venue_types))
-    emit_json([h.to_dict() for h in hits], args.out)
-
-if __name__ == "__main__":
-    _main()

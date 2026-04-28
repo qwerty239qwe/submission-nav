@@ -221,8 +221,18 @@ def _cmd_triage(args) -> int:
     text = Path(args.comments_file).read_text(encoding="utf-8")
     items = parse_reviewer_comments(text)
     payload = {"items": items, "skeleton": build_response_skeleton(items)}
-    out_path = Path(args.out) if args.out else Path(args.comments_file).with_suffix(".triage.json")
+    if args.out:
+        out_path = Path(args.out)
+    elif getattr(args, "manuscript", None):
+        run = paths_for(args.manuscript, args.run_dir)
+        out_path = run.run_dir / "triage.json"
+        payload["manuscript"] = str(Path(args.manuscript).resolve())
+    else:
+        out_path = Path(args.comments_file).with_suffix(".triage.json")
     _write(out_path, payload)
+    if getattr(args, "manuscript", None):
+        run = paths_for(args.manuscript, args.run_dir)
+        update_manifest(run.run_dir, args.manuscript, "triage", [out_path])
     _print_ok("triage", out_path)
     return 0
 
@@ -252,24 +262,36 @@ def _cmd_config(args) -> int:
     return 0
 
 
+def _probe_dep(name: str) -> bool:
+    import importlib
+
+    try:
+        importlib.import_module(name)
+        return True
+    except Exception:
+        return False
+
+
 def _cmd_doctor(args) -> int:
+    import os
+
     cfg = Config.load()
+    deps = {name: _probe_dep(name) for name in
+            ("httpx", "fitz", "docx", "PIL", "pydantic", "rapidfuzz")}
     payload = {
         "version": __version__,
+        "sn_home": str(Path(__file__).resolve().parents[2]),
         "config_dir": str(cfg.config_dir),
         "cache_dir": str(cfg.cache_dir),
         "rules_dir": str(cfg.rules_dir),
-        "writable_config": os_access(cfg.config_dir),
+        "writable_config": os.access(cfg.config_dir, os.W_OK),
+        "writable_cache": os.access(cfg.cache_dir, os.W_OK),
+        "deps": deps,
+        "ok": all(deps.values()) and os.access(cfg.config_dir, os.W_OK),
     }
     emit_json(payload)
     _print_ok("doctor", cfg.config_dir)
     return 0
-
-
-def os_access(path: Path) -> bool:
-    import os
-
-    return os.access(path, os.W_OK)
 
 
 def _cmd_runs(args) -> int:
@@ -293,6 +315,9 @@ def _build_parser() -> argparse.ArgumentParser:
         p.add_argument("--run-dir")
         p.add_argument("--force", action="store_true")
         p.add_argument("-q", "--quiet", action="store_true")
+        p.add_argument("-v", "--verbose", action="store_true")
+        p.add_argument("--json", dest="json_progress", action="store_true",
+                       help="Emit machine-readable progress on stderr.")
 
     p = sub.add_parser("parse")
     add_common(p)
@@ -354,6 +379,8 @@ def _build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("triage")
     p.add_argument("comments_file")
+    p.add_argument("--manuscript")
+    p.add_argument("--run-dir")
     p.add_argument("--out")
     p.set_defaults(func=_cmd_triage)
 
@@ -395,9 +422,29 @@ def main(argv: list[str] | None = None) -> int:
     except FileNotFoundError as exc:
         print(f"INPUT {exc}", file=sys.stderr)
         return EXIT_INPUT
+    except (ValueError, KeyError, argparse.ArgumentError) as exc:
+        print(f"USAGE {exc}", file=sys.stderr)
+        return EXIT_USER
     except Exception as exc:
+        if _looks_like_network_error(exc):
+            print(f"EXTERNAL {exc}", file=sys.stderr)
+            return EXIT_EXTERNAL
         print(f"ERROR {exc}", file=sys.stderr)
         return EXIT_INTERNAL
+
+
+def _looks_like_network_error(exc: BaseException) -> bool:
+    name = type(exc).__name__
+    if name.startswith(("HTTP", "Connect", "Timeout", "Network", "Remote")):
+        return True
+    try:
+        import httpx
+
+        if isinstance(exc, httpx.HTTPError):
+            return True
+    except Exception:
+        pass
+    return False
 
 
 if __name__ == "__main__":
