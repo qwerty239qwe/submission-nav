@@ -26,3 +26,21 @@ def test_detect_specialties_supports_non_biomedical_fields_generically():
     }
     domains = detect_specialties(summary, {"domains": []}, {"concepts": ["civil engineering", "seismic resilience"]})
     assert "engineering" in domains
+    assert "earth_science" in domains
+
+
+def test_detect_specialties_supports_broad_cross_field_taxonomy():
+    cases = [
+        ("Bayesian causal inference for labor market policy", "economics", "data_science"),
+        ("Photovoltaic battery materials science for power grids", "energy", "materials_science"),
+        ("Teacher curriculum design and student learning outcomes", "education", "social_science"),
+        ("Neural dynamics in cognitive neuroimaging", "neuroscience", "machine_learning"),
+    ]
+    for title, expected_primary, expected_secondary in cases:
+        domains = detect_specialties(
+            {"title": title, "abstract": title, "section_headings": []},
+            {"domains": []},
+            {"concepts": []},
+        )
+        assert expected_primary in domains
+        assert expected_secondary in domains

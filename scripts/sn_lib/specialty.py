@@ -6,18 +6,30 @@ from .venues import VenueHit
 
 
 GENERIC_DOMAINS = {
+    "agriculture": ("agriculture", "crop", "soil", "plant breeding", "livestock", "agronomy"),
+    "astronomy": ("astronomy", "astrophysics", "galaxy", "cosmology", "planetary"),
+    "business_management": ("business", "management", "marketing", "organization", "entrepreneurship", "strategy"),
     "toxicology": ("toxicity", "toxicology", "toxicological", "drug safety"),
     "cheminformatics": ("cheminformatics", "molecular descriptor", "molecular fingerprint", "qsar"),
-    "pharmacology": ("pharmacology", "drug discovery", "drug development"),
-    "bioinformatics": ("bioinformatics", "genomics", "transcriptomics", "omics"),
-    "machine_learning": ("machine learning", "deep learning", "classifier", "prediction"),
-    "clinical": ("patient", "clinical", "diagnosis", "prognosis"),
-    "engineering": ("engineering", "materials", "mechanical", "electrical", "civil"),
-    "computer_science": ("computer science", "algorithm", "software", "network", "computing"),
-    "environmental_science": ("environmental", "ecology", "climate", "biodiversity"),
-    "social_science": ("social", "psychology", "sociology", "education", "policy"),
     "chemistry": ("chemistry", "chemical", "synthesis", "catalysis", "molecule"),
+    "clinical": ("patient", "clinical", "diagnosis", "prognosis", "therapy", "trial"),
+    "computer_science": ("computer science", "algorithm", "software", "network", "computing", "database"),
+    "data_science": ("data science", "statistics", "statistical", "regression", "bayesian", "causal inference"),
+    "earth_science": ("geology", "geoscience", "earth science", "seismic", "geophysics", "hydrology"),
+    "economics": ("economics", "economic", "market", "inflation", "labor", "trade"),
+    "education": ("education", "student", "teacher", "learning outcomes", "curriculum", "pedagogy"),
+    "energy": ("energy", "battery", "solar", "photovoltaic", "fuel cell", "power grid"),
+    "engineering": ("engineering", "mechanical engineering", "electrical engineering", "civil engineering", "manufacturing", "robotics"),
+    "environmental_science": ("environmental", "ecology", "climate", "biodiversity", "ecosystem", "pollution"),
+    "humanities": ("history", "literary", "philosophy", "language", "culture", "religion"),
+    "materials_science": ("materials science", "nanomaterial", "polymer", "alloy", "thin film", "semiconductor"),
+    "mathematics": ("mathematics", "theorem", "proof", "geometry", "algebra", "optimization"),
+    "machine_learning": ("machine learning", "deep learning", "classifier", "prediction", "neural network", "neural"),
+    "neuroscience": ("neuroscience", "brain", "neuron", "neural", "cognitive", "neuroimaging"),
+    "pharmacology": ("pharmacology", "drug discovery", "drug development", "therapeutic", "pharmacokinetic"),
     "physics": ("physics", "quantum", "optical", "particle", "condensed matter"),
+    "public_health": ("public health", "epidemiology", "health policy", "population health", "prevalence"),
+    "social_science": ("social", "psychology", "sociology", "policy", "survey", "qualitative", "student", "teacher"),
 }
 
 
