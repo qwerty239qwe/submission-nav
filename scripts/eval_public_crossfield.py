@@ -242,6 +242,11 @@ def main() -> int:
     out_dir.mkdir(parents=True, exist_ok=True)
     manifest: list[dict] = []
     results: list[dict] = []
+
+    def flush_outputs() -> None:
+        (out_dir / "results.json").write_text(json.dumps(results, indent=2, ensure_ascii=False), encoding="utf-8")
+        (out_dir / "manifest.json").write_text(json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8")
+
     for field in args.fields:
         works = fetch_candidates(FIELDS[field], from_date=args.from_date, to_date=args.to_date)
         for tier in args.tiers:
@@ -254,6 +259,7 @@ def main() -> int:
                     "to_date": args.to_date,
                     "error": "no OpenAlex work found for tier proxy",
                 })
+                flush_outputs()
                 continue
             case_dir = out_dir / f"{field}_{tier}"
             case_dir.mkdir(parents=True, exist_ok=True)
@@ -279,8 +285,8 @@ def main() -> int:
             result["from_date"] = args.from_date
             result["to_date"] = args.to_date
             results.append(result)
-            (out_dir / "results.json").write_text(json.dumps(results, indent=2, ensure_ascii=False), encoding="utf-8")
-            (out_dir / "manifest.json").write_text(json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8")
+            flush_outputs()
+    flush_outputs()
     return 0
 
 
