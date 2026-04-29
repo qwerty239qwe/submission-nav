@@ -194,9 +194,9 @@ def _venue_kind(venue: VenueHit) -> set[str]:
     concepts = _norm(" ".join(venue.concepts))
     text = f"{name} {concepts}"
     kinds: set[str] = set()
-    if re.search(r"\b(nature reviews|annual reviews?|annual review|systematic reviews?|reviews? in|journal of reviews?|review of|trends in|current opinion|critical reviews?)\b", name):
+    if re.search(r"\b(nature reviews|annual reviews?|annual review|systematic reviews?|reviews? in|journal of reviews?|review of|trends in|current opinion|critical reviews?|review journals?)\b", name):
         kinds.add("review")
-    if re.search(r"\b(methods?|protocols?)\b", name):
+    if re.search(r"\b(methods?|protocols?|methodology)\b", name):
         kinds.add("methods")
     if re.search(r"\b(scientific data|data in brief|database|data)\b", name):
         kinds.add("data")
@@ -223,6 +223,9 @@ def _article_type_fit(profile: ManuscriptProfile, venue: VenueHit) -> tuple[floa
     if "methods" in kinds and ctype not in {"method_development", "software"}:
         fit = min(fit, 0.45)
         reasons.append("methods/protocol venue but manuscript is not primarily a novel method")
+    if {"review", "methods"} <= kinds and ctype not in {"review", "method_development", "software"}:
+        fit = min(fit, 0.05)
+        reasons.append("review/methods-focused venue for a standard original-research manuscript")
     if "data" in kinds and ctype not in {"dataset", "software"}:
         fit = min(fit, 0.45)
         reasons.append("data/resource venue but manuscript is not primarily a dataset resource")

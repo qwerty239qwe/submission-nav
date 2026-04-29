@@ -121,6 +121,22 @@ def test_strategy_penalizes_systematic_reviews_journal_for_original_research():
     assert "review-only/review-focused" in ranked[1].rationale["risk_reasons"][0]
 
 
+def test_balanced_ranking_caps_high_impact_review_venue_with_topical_overlap():
+    review = _v("Systematic Reviews", ["machine learning", "clinical prediction", "patient cohort"], 12.0, oa=True)
+    target = _v("Journal of Biomedical Informatics", ["machine learning", "clinical decision support"], 3.0, oa=True)
+    ranked = rank_venues(
+        ["machine learning", "clinical prediction", "patient cohort"],
+        [review, target],
+        strategy="balanced",
+        ms_title="Machine learning prediction from clinical records",
+        ms_abstract="We trained and validated machine learning models in a patient cohort.",
+    )
+    assert ranked[0].venue.name == "Journal of Biomedical Informatics"
+    assert ranked[1].venue.name == "Systematic Reviews"
+    assert ranked[1].score <= 0.25
+    assert ranked[1].rationale["risk_label"] == "high"
+
+
 def test_ambitious_strategy_caps_review_only_venue_even_with_high_impact():
     review = _v("Annual Review of Biomedical Science", ["biochemistry", "genetics"], 12.0)
     target = _v("Genome Biology", ["genomics", "omics", "genetic disorders"], 5.0, oa=True)

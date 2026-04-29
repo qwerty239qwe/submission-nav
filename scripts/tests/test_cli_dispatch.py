@@ -4,7 +4,7 @@ import respx
 import httpx
 from docx import Document
 
-from sn_lib.cli import main
+from sn_lib.cli import _concept_queries, main
 
 
 def _docx(path):
@@ -82,6 +82,11 @@ def test_cli_doctor_reports_publisher_risk_path(tmp_config_dir, capsys):
     payload = json.loads(payload_text)
     assert payload["publisher_risk_path"].endswith("publisher_risk.json")
     assert payload["publisher_risk_configured"] is False
+
+
+def test_concept_queries_prefers_stored_queries_and_falls_back_for_old_cache():
+    assert _concept_queries({"concepts": ["new widget"], "queries": ["stored query"]}, 4) == ["stored query"]
+    assert _concept_queries({"concepts": ["new widget", "gradient descent"]}, 4)[0] == "new widget gradient descent"
 
 
 @respx.mock

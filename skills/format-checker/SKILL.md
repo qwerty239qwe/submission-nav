@@ -5,86 +5,45 @@ description: Use when the user wants to check whether a manuscript, figures, or 
 
 # format-checker
 
-This skill compares manuscript and figure properties against cached journal rules and reports likely violations.
+Check a manuscript against cached journal submission rules.
 
-It is suitable for Codex, Claude, Gemini, and similar agent hosts that can run local helper commands.
+## Use When
 
-## When to use
+- Manuscript readiness checks for a named journal.
+- Figure, word-count, or rule-compliance checks.
+- Must-fix formatting issues before submission.
 
-Use this skill when the user:
-- wants a pre-submission format check
-- asks whether a manuscript meets a journal's figure or text constraints
-- wants a list of must-fix formatting issues before submission
+## Inputs
 
-## Preconditions
+- target journal name or slug
+- manuscript path, preferably PDF for figure checks
+- cached rules JSON from `journal-rules`
 
-Before running this skill:
-
-1. A rules JSON file must exist under the submission-nav rules cache.
-- If not, run `journal-rules` first.
-
-2. A parsed manuscript JSON or a manuscript source file must be available
-- If not, run:
-
-```bash
-sn parse "<path-to-manuscript>"
-```
-
-## Required inputs
-
-- target journal
-- manuscript PDF path for figure inspection
-
-## Optional inputs
-
-- parsed manuscript JSON with word count
-- original DOCX path for supplemental text checks
+If rules are missing, run `journal-rules` first. Do not refetch author instructions during this skill unless the user asks.
 
 ## Procedure
 
-1. Confirm which journal rules file should be used.
-- If multiple cached rules files exist, ask the user to choose.
-
-2. Let the helper parse the manuscript and determine word count.
-
-3. Run the figure and format check:
+1. Confirm the target journal and cached rules file.
+2. Run the checker:
 
 ```bash
-sn check "<pdf-path>" --journal "<slug>"
+sn check "<manuscript-path>" --journal "<journal-slug>"
 ```
 
-4. Read the generated JSON and classify results into:
-- violations
-- warnings
-- passes
+3. Read the generated check JSON from the manuscript run directory.
+4. Classify findings into `Violations`, `Warnings`, and `OK`.
+5. Give concrete fixes for each violation or warning.
 
-5. Report findings with concrete next actions.
+## Report Format
 
-## Output requirements
-
-Present:
 - `Violations (must fix)`
-- `Warnings (could not verify or may need manual review)`
+- `Warnings (manual review or uncertain)`
 - `OK`
 
-For each violation or warning, include a specific fix suggestion when possible.
+For each item, state the rule, the observed issue, and the recommended fix.
 
-Examples:
-- `Figure 2 is below the required DPI threshold; re-export at the journal minimum DPI.`
-- `Reference limit not detected automatically; verify against the source document manually.`
+## Reliability
 
-## Reliability rules
-
-- If the manuscript source is DOCX and only the PDF is inspected, warn that original image DPI may be unavailable
-- Do not claim compliance for fields that were not actually checked
-- If the rules JSON is incomplete, say which constraints could not be evaluated
-
-## Handoff
-
-If missing rules block the check, run `journal-rules` first and then retry.
-
-## Manual verification
-
-```bash
-sn check "<pdf-path>" --journal "<slug>"
-```
+- Do not claim compliance for unchecked constraints.
+- If only a DOCX is available, say figure DPI may be unavailable.
+- If rules are incomplete, list missing constraints.

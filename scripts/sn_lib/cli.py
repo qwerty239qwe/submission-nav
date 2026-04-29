@@ -258,18 +258,24 @@ def _cmd_rank(args) -> int:
     return 0
 
 
-def _cmd_strategist(args) -> int:
+def _concept_queries(concepts_payload: dict, max_queries: int) -> list[str]:
     from .concepts import build_queries
 
+    concepts = concepts_payload.get("concepts", [])
+    stored = concepts_payload.get("queries")
+    queries = stored if isinstance(stored, list) and stored else build_queries(concepts)
+    return list(queries)[:max_queries]
+
+
+def _cmd_strategist(args) -> int:
     _ensure_concepts(args)
     _ensure_contribution(args)
     _ensure_specialty(args)
     run = paths_for(args.manuscript, args.run_dir)
     concepts_payload = _read_json(run.concepts)
-    concepts = concepts_payload.get("concepts", [])
-    base_queries = list(concepts_payload.get("queries") or build_queries(concepts))
+    base_queries = _concept_queries(concepts_payload, args.max_queries)
     specialty_plan = _read_json(run.specialty_queries)
-    queries = base_queries[: args.max_queries]
+    queries = list(base_queries)
     for query in specialty_plan.get("queries") or []:
         if query not in queries:
             queries.append(query)
