@@ -46,7 +46,11 @@ TIERS = {
 
 def default_from_date(today: date | None = None) -> str:
     today = today or date.today()
-    return date(today.year - 5, today.month, today.day).isoformat()
+    return date(today.year - 5, 1, 1).isoformat()
+
+
+def default_to_date(today: date | None = None) -> str:
+    return (today or date.today()).isoformat()
 
 
 def _abstract(index: dict | None) -> str:
@@ -228,9 +232,9 @@ def main() -> int:
     ap.add_argument("--fields", nargs="*", default=list(FIELDS))
     ap.add_argument("--tiers", nargs="*", default=list(TIERS))
     ap.add_argument("--from-date", default=default_from_date(),
-                    help="Earliest publication date for sampled OpenAlex works. Defaults to five years ago.")
-    ap.add_argument("--to-date", default=None,
-                    help="Latest publication date for sampled OpenAlex works.")
+                    help="Earliest publication date for sampled OpenAlex works. Defaults to January 1 five years ago.")
+    ap.add_argument("--to-date", default=default_to_date(),
+                    help="Latest publication date for sampled OpenAlex works. Defaults to today.")
     args = ap.parse_args()
 
     repo = Path(__file__).resolve().parents[1]
