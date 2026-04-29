@@ -1,6 +1,6 @@
 import respx, httpx
 from sn_lib.config import Config
-from sn_lib.venues import search_dblp_venues, search_openalex, search_venues, VenueHit, _merge_hits
+from sn_lib.venues import search_dblp_venues, search_openalex, search_venues, VenueHit, _merge_hits, expand_neighbor_venues
 
 @respx.mock
 def test_search_openalex_parses_hits(tmp_config_dir, monkeypatch):
@@ -221,6 +221,57 @@ def test_search_venues_boosts_repeated_similar_work_sources(tmp_config_dir, monk
     assert hits[0].evidence_count == 2
     assert hits[0].specialty_domain == "similar_works"
     assert hits[0].specialty_confidence >= 0.6
+
+
+@respx.mock
+def test_expand_neighbor_venues_adds_new_sources_without_field_seeds(tmp_config_dir, monkeypatch):
+    monkeypatch.delenv("ELSEVIER_API_KEY", raising=False)
+    monkeypatch.delenv("SCOPUS_KEY", raising=False)
+    monkeypatch.delenv("DOAJ_KEY", raising=False)
+    monkeypatch.delenv("CROSSREF_EMAIL", raising=False)
+    seed = VenueHit(
+        id="S1",
+        name="Journal of Widget Science",
+        issn="1111-1111",
+        publisher=None,
+        is_oa=False,
+        apc_usd=None,
+        impact_proxy=2.0,
+        h_index=20,
+        concepts=["Widget optimization"],
+        source="openalex-works",
+        evidence_count=2,
+        specialty_domain="similar_works",
+        specialty_confidence=0.66,
+    )
+    respx.get("https://api.openalex.org/works").mock(
+        return_value=httpx.Response(200, json={"results": [
+            {
+                "primary_location": {"source": {
+                    "id": "S1",
+                    "display_name": "Journal of Widget Science",
+                    "issn_l": "1111-1111",
+                    "type": "journal",
+                }},
+                "primary_topic": {"display_name": "Widget optimization"},
+            },
+            {
+                "primary_location": {"source": {
+                    "id": "S2",
+                    "display_name": "Applied Widget Letters",
+                    "issn_l": "2222-2222",
+                    "type": "journal",
+                }},
+                "primary_topic": {"display_name": "Widget optimization"},
+            },
+        ]})
+    )
+
+    hits = expand_neighbor_venues("widget optimization", [seed], per_seed=5)
+
+    assert [hit.name for hit in hits] == ["Applied Widget Letters"]
+    assert hits[0].source == "openalex-works+neighbor"
+    assert hits[0].specialty_domain == "source_neighborhood"
 
 
 def test_merge_hits_combines_exact_name_specialty_seed_with_metadata():

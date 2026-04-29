@@ -18,6 +18,8 @@ ELSEVIER_REQUESTS_PER_SECOND = 6
 ELSEVIER_MIN_INTERVAL_SECONDS = 1.0 / ELSEVIER_REQUESTS_PER_SECOND
 ELSEVIER_ENRICH_TOP_N = 10
 DBLP_ENRICH_TOP_N = 20
+NEIGHBOR_EXPAND_SEEDS = 4
+NEIGHBOR_EXPAND_PER_SEED = 12
 _last_elsevier_request_ts = 0.0
 
 @dataclass
@@ -186,6 +188,11 @@ def _query_tokens(query: str) -> set[str]:
     return {token for token in re_split_words(query) if token not in stop and len(token) > 2}
 
 
+def _ordered_query_tokens(query: str) -> list[str]:
+    tokens = _query_tokens(query)
+    return [token for token in re_split_words(query) if token in tokens]
+
+
 def re_split_words(text: str) -> list[str]:
     import re
 
@@ -201,6 +208,65 @@ def _source_specialty_confidence(query: str, hit: VenueHit) -> float:
     if matched == 0:
         return 0.0
     return min(0.55, matched / max(len(tokens), 1) * 0.55)
+
+
+def _neighbor_queries(query: str, hits: list[VenueHit], limit: int = NEIGHBOR_EXPAND_SEEDS) -> list[str]:
+    query_terms = _ordered_query_tokens(query)[:4]
+    out: list[str] = []
+    ranked = sorted(
+        hits,
+        key=lambda h: (h.evidence_count, h.specialty_confidence or 0.0, h.impact_proxy or 0.0, h.h_index or 0),
+        reverse=True,
+    )
+    for hit in ranked:
+        if len(out) >= limit:
+            break
+        concept_terms = []
+        for concept in hit.concepts[:4]:
+            clean = " ".join(_ordered_query_tokens(concept)[:4])
+            if clean and clean not in concept_terms:
+                concept_terms.append(clean)
+        for concept in concept_terms:
+            pieces = [concept]
+            for term in query_terms:
+                if term not in concept.split():
+                    pieces.append(term)
+                if len(pieces) >= 5:
+                    break
+            neighbor_query = " ".join(pieces).strip()
+            if neighbor_query and neighbor_query not in out:
+                out.append(neighbor_query)
+                break
+    return out
+
+
+def expand_neighbor_venues(
+    query: str,
+    hits: list[VenueHit],
+    per_seed: int = NEIGHBOR_EXPAND_PER_SEED,
+    venue_types: tuple[str, ...] = ("journal",),
+) -> list[VenueHit]:
+    """Second-hop retrieval from first-hop venue concepts.
+
+    OpenAlex source search is useful but often misses the exact journal that
+    published similar papers. A bounded second pass through works gives the
+    ranker more neighboring venues without relying on field-specific seeds.
+    """
+    expanded: list[VenueHit] = []
+    existing_keys = {key for hit in hits for key in _hit_keys(hit)}
+    for neighbor_query in _neighbor_queries(query, hits):
+        for hit in search_openalex_by_works(neighbor_query, per_page=per_seed, venue_types=venue_types):
+            if any(key in existing_keys for key in _hit_keys(hit)):
+                continue
+            hit.source = f"{hit.source}+neighbor"
+            if (hit.specialty_confidence or 0.0) < 0.44:
+                hit.specialty_confidence = 0.44
+                hit.specialty_domain = "source_neighborhood"
+            elif hit.specialty_domain == "similar_works":
+                hit.specialty_domain = "source_neighborhood"
+            expanded.append(hit)
+            existing_keys.update(_hit_keys(hit))
+    return expanded
 
 
 def _hit_key(hit: VenueHit) -> str:
@@ -435,7 +501,12 @@ def enrich_dblp(hit: VenueHit) -> dict | None:
     return best if score >= 72 else None
 
 
-def search_venues(query: str, per_page: int = 25, venue_types: tuple[str, ...] = ("journal",)) -> list[VenueHit]:
+def search_venues(
+    query: str,
+    per_page: int = 25,
+    venue_types: tuple[str, ...] = ("journal",),
+    expand_neighbors: bool = False,
+) -> list[VenueHit]:
     hits = _merge_hits(
         search_openalex_by_works(query, per_page=max(50, per_page), venue_types=venue_types),
         search_openalex(query, per_page=per_page, venue_types=venue_types),
@@ -445,6 +516,10 @@ def search_venues(query: str, per_page: int = 25, venue_types: tuple[str, ...] =
         if source_confidence > (hit.specialty_confidence or 0.0):
             hit.specialty_confidence = source_confidence
             hit.specialty_domain = "source_concepts"
+    if expand_neighbors:
+        neighbor_hits = expand_neighbor_venues(query, hits, venue_types=venue_types)
+        if neighbor_hits:
+            hits = _merge_hits(hits, neighbor_hits)
     for idx, h in enumerate(hits):
         if idx >= ELSEVIER_ENRICH_TOP_N:
             break

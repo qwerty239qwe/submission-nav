@@ -195,7 +195,12 @@ def _cmd_venues(args) -> int:
     else:
         raise ValueError("sn venues needs --manuscript, --run-dir, or --out")
     if not outputs_fresh([], [out_path], args.force):
-        hits = search_venues(args.query, per_page=args.per_page, venue_types=tuple(args.venue_types))
+        hits = search_venues(
+            args.query,
+            per_page=args.per_page,
+            venue_types=tuple(args.venue_types),
+            expand_neighbors=getattr(args, "expand_neighbors", False),
+        )
         _write(out_path, [hit.to_dict() for hit in hits])
         if run:
             update_manifest(run.run_dir, getattr(args, "manuscript", None), "venues", [out_path])
@@ -282,6 +287,7 @@ def _cmd_strategist(args) -> int:
                 query=query,
                 per_page=args.per_page,
                 venue_types=args.venue_types,
+                expand_neighbors=args.expand_neighbors,
                 out=str(out_path),
                 run_dir=str(run.run_dir),
                 manuscript=args.manuscript,
@@ -481,6 +487,8 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--per-page", type=int, default=40)
     p.add_argument("--venue-types", nargs="+", default=["journal"],
                    choices=["journal", "conference"])
+    p.add_argument("--expand-neighbors", action="store_true",
+                   help="Opt in to second-hop OpenAlex venue expansion; slower and broader.")
     p.add_argument("--out")
     p.set_defaults(func=_cmd_venues)
 
@@ -502,6 +510,8 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--oa-preference", default="any", choices=["any", "oa-only", "avoid-oa"])
     p.add_argument("--venue-types", nargs="+", default=["journal"],
                    choices=["journal", "conference"])
+    p.add_argument("--expand-neighbors", action="store_true",
+                   help="Opt in to second-hop OpenAlex venue expansion; slower and broader.")
     p.add_argument("--per-page", type=int, default=40)
     p.add_argument("--agent-top-n", type=int, default=12)
     p.add_argument("--max-queries", type=int, default=4)
