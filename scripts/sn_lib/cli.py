@@ -123,13 +123,40 @@ def _ensure_profile(args) -> Path:
     return run.run_dir
 
 
-def _cmd_specialty(args) -> int:
-    from .specialty import build_specialty_plan, seed_venues_from_plan
+def _cmd_contribution(args) -> int:
+    from .contribution import assess_contribution
 
     _ensure_profile(args)
     run = paths_for(args.manuscript, args.run_dir)
+    outputs = [run.contribution]
+    inputs = [run.ms_summary, run.ms_full, run.profile]
+    if not outputs_fresh(inputs, outputs, args.force):
+        with run_lock(run.run_dir):
+            payload = assess_contribution(
+                _read_json(run.ms_summary),
+                _read_json(run.profile),
+                _read_json(run.ms_full) if run.ms_full.exists() else None,
+            )
+            _write(run.contribution, payload)
+            update_manifest(run.run_dir, args.manuscript, "contribution", outputs)
+    _print_ok("contribution", run.contribution)
+    return 0
+
+
+def _ensure_contribution(args) -> Path:
+    run = paths_for(args.manuscript, args.run_dir)
+    if not run.contribution.exists() or args.force:
+        _cmd_contribution(args)
+    return run.run_dir
+
+
+def _cmd_specialty(args) -> int:
+    from .specialty import build_specialty_plan, seed_venues_from_plan
+
+    _ensure_contribution(args)
+    run = paths_for(args.manuscript, args.run_dir)
     outputs = [run.specialty_queries, run.specialty_venues]
-    inputs = [run.ms_summary, run.concepts, run.profile]
+    inputs = [run.ms_summary, run.concepts, run.profile, run.contribution]
     if not outputs_fresh(inputs, outputs, args.force):
         with run_lock(run.run_dir):
             plan = build_specialty_plan(
@@ -188,7 +215,7 @@ def _cmd_rank(args) -> int:
     from .ranking import rank_venues, summarize_bucketed
     from .venues import VenueHit, _merge_hits
 
-    _ensure_profile(args)
+    _ensure_contribution(args)
     run = paths_for(args.manuscript, args.run_dir)
     concepts_payload = _read_json(run.concepts)
     concepts = concepts_payload.get("concepts") if isinstance(concepts_payload, dict) else []
@@ -199,7 +226,7 @@ def _cmd_rank(args) -> int:
     ranked_out = run.run_dir / f"ranked_{suffix}.json"
     agent_out = run.run_dir / f"ranked_agent_{suffix}.json"
     bucketed_out = run.run_dir / f"ranked_buckets_{suffix}.json"
-    inputs = [run.concepts, run.ms_summary, run.profile, *venue_files]
+    inputs = [run.concepts, run.ms_summary, run.profile, run.contribution, *venue_files]
     if not outputs_fresh(inputs, [ranked_out, agent_out, bucketed_out], args.force):
         loaded_venues = []
         for path in venue_files:
@@ -215,6 +242,7 @@ def _cmd_rank(args) -> int:
             oa_preference=args.oa_preference,
             ms_title=summary.get("title"),
             ms_abstract=summary.get("abstract"),
+            contribution_assessment=_read_json(run.contribution),
         )
         _write(ranked_out, [item.to_dict() for item in ranked])
         bucketed = summarize_bucketed(ranked, strategy=args.strategy, top_n=args.agent_top_n)
@@ -229,6 +257,7 @@ def _cmd_strategist(args) -> int:
     from .concepts import build_queries
 
     _ensure_concepts(args)
+    _ensure_contribution(args)
     _ensure_specialty(args)
     run = paths_for(args.manuscript, args.run_dir)
     concepts_payload = _read_json(run.concepts)
@@ -423,6 +452,12 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("manuscript")
     p.add_argument("--oa-preference", default="any", choices=["any", "oa-only", "avoid-oa"])
     p.set_defaults(func=_cmd_profile)
+
+    p = sub.add_parser("contribution")
+    add_common(p)
+    p.add_argument("manuscript")
+    p.add_argument("--oa-preference", default="any", choices=["any", "oa-only", "avoid-oa"])
+    p.set_defaults(func=_cmd_contribution)
 
     p = sub.add_parser("specialty")
     add_common(p)

@@ -40,32 +40,43 @@ sn strategist "<manuscript>" --strategy broad --venue-types conference --agent-t
 
 3. Use the specialty-expanded candidate pool before judging results. The chained workflow writes:
 - `ms_profile.json`: manuscript profile used for article-type and scope gates
+- `contribution_assessment.json`: deterministic contribution tier, strengths, limitations, and ambition bands
 - `specialty_queries.json`: detected specialty domains, added search queries, and seed journals
 - `specialty_venues.json`: high-recall specialty seed venues that enter ranking even if API keyword search misses them
 - `ranked_agent_<strategy>.json` and `ranked_buckets_<strategy>.json`: final bucketed recommendations
 
-Inspect `specialty_queries.json` if the final venues look generic. If obvious field journals are missing, rerun with `--strategy broad` or broaden the manuscript-specific query.
+Inspect `contribution_assessment.json` if the recommendation ladder looks too ambitious or too conservative. Inspect `specialty_queries.json` if the final venues look generic. If obvious field journals are missing, rerun with `--strategy broad` or broaden the manuscript-specific query.
 
-4. Use the bucketed output as the primary decision structure:
+4. Use contribution and ambition alignment before presenting stretch options:
+- `exploratory`: emphasize safe or broad fallback venues
+- `solid_specialty`: emphasize specialty targets and conservative selective-specialty stretch venues
+- `strong_specialty`: allow selective specialty and some high-impact specialty venues
+- `high_impact_specialty`: allow high-impact specialty venues
+- `elite_general`: only then treat elite general/top clinical venues as serious options
+
+Do not present elite general/top clinical venues as realistic if the contribution assessment marks those bands as avoid.
+
+5. Use the bucketed output as the primary decision structure:
 - `stretch`: plausible higher-impact options
 - `target`: strongest balance of fit and suitability
 - `safe`: lower-risk fallbacks
 - `fallback`: weak-score or caution cases
 - `avoid`: article-type, scope, or publisher-integrity mismatches
 
-5. Screen obvious article-type mismatches before presenting results:
+6. Screen obvious article-type mismatches before presenting results:
 - review journals for original research
 - method journals for papers without a new method
 - data/resource journals for non-resource papers
 - elite broad-scope journals when the manuscript lacks correspondingly broad novelty
 
-6. Present a decision-oriented result.
+7. Present a decision-oriented result.
 
 ## Output
 
 Return:
 - a Markdown table of the top 5 to 10 venues
 - the strategy used
+- the contribution tier and one-sentence implication for ambition
 - a short rationale for the top pick
 - a submission ladder from the generated buckets: stretch, target, safe
 - caveats such as APC conflict, weak scope evidence, partial metadata enrichment, or low-confidence parsing

@@ -2,6 +2,7 @@ from __future__ import annotations
 from dataclasses import dataclass, asdict
 from rapidfuzz import fuzz
 from .cli import emit_json
+from .contribution import ambition_alignment, ambition_cap, classify_venue_ambition
 from .suitability import infer_manuscript_profile, score_suitability
 from .venues import VenueHit
 
@@ -38,6 +39,9 @@ class Ranked:
             "publisher_risk_reasons": self.rationale.get("publisher_risk_reasons", []),
             "specialty_domain": self.rationale.get("specialty_domain"),
             "specialty_fit": self.rationale.get("specialty_fit"),
+            "venue_ambition_band": self.rationale.get("venue_ambition_band"),
+            "contribution_tier": self.rationale.get("contribution_tier"),
+            "ambition_reason": self.rationale.get("ambition_reason"),
             "rationale": self.rationale,
         }
 
@@ -101,6 +105,7 @@ def rank_venues(
     oa_preference: str = "any",
     ms_title: str | None = None,
     ms_abstract: str | None = None,
+    contribution_assessment: dict | None = None,
     w_fit: float = 0.6,
     w_impact: float = 0.3,
     w_oa: float = 0.1,
@@ -133,7 +138,9 @@ def rank_venues(
             apc_budget_usd=apc_budget_usd,
             oa_preference=oa_preference,
         )
-        score = suitability.strategy_score
+        venue_band = classify_venue_ambition(v)
+        ambition_delta, contribution_tier, ambition_reason = ambition_alignment(contribution_assessment, venue_band)
+        score = ambition_cap(contribution_assessment, venue_band, suitability.strategy_score + ambition_delta)
         suitability_payload = suitability.to_dict()
         out.append(Ranked(v, round(score, 4), {
             "strategy": strategy,
@@ -159,6 +166,10 @@ def rank_venues(
             "publisher_risk_reasons": suitability_payload["publisher_risk_reasons"],
             "risk_label": suitability_payload["risk_label"],
             "risk_reasons": suitability_payload["risk_reasons"],
+            "venue_ambition_band": venue_band,
+            "contribution_tier": contribution_tier,
+            "ambition_delta": round(ambition_delta, 3),
+            "ambition_reason": ambition_reason,
             "manuscript_profile": suitability_payload["profile"],
         }))
     out.sort(key=lambda r: r.score, reverse=True)
@@ -185,6 +196,8 @@ def _bucket_for(item: Ranked) -> tuple[str, str]:
     reasons = rationale.get("risk_reasons") or []
     article_type_fit = rationale.get("article_type_fit") or 1.0
     publisher_label = rationale.get("publisher_risk_label")
+    venue_band = rationale.get("venue_ambition_band")
+    ambition_reason = rationale.get("ambition_reason") or ""
     impact = _impact(item.venue.impact_proxy)
     if publisher_label in {"potential_predatory_match", "hijacked_or_identity_risk"}:
         return "avoid", "publisher integrity risk"
@@ -194,6 +207,10 @@ def _bucket_for(item: Ranked) -> tuple[str, str]:
         return "avoid", "high risk"
     if article_type_fit < 0.7 or any("outside the manuscript" in reason for reason in reasons):
         return "fallback", "scope or article-type caution"
+    if "exceeds contribution assessment" in ambition_reason and venue_band in {"elite_general", "top_clinical"}:
+        return "avoid", "ambition mismatch"
+    if "exceeds contribution assessment" in ambition_reason or "probably too ambitious" in ambition_reason:
+        return "fallback", "ambition caution"
     if item.score >= 0.43 and impact >= 0.30:
         return "stretch", "higher-impact plausible venue"
     if item.score >= 0.50:

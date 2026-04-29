@@ -38,6 +38,17 @@ def test_cli_profile_writes_manuscript_profile(tmp_path, tmp_config_dir, capsys)
     assert "data_type" in payload
 
 
+def test_cli_contribution_writes_assessment(tmp_path, tmp_config_dir, capsys):
+    manuscript = tmp_path / "paper.docx"
+    _docx(manuscript)
+    assert main(["contribution", str(manuscript)]) == 0
+    assert "OK contribution" in capsys.readouterr().out
+    contribution_path = next((tmp_config_dir / "runs").glob("*/contribution_assessment.json"))
+    payload = json.loads(contribution_path.read_text(encoding="utf-8"))
+    assert payload["contribution_tier"] in {"exploratory", "solid_specialty", "strong_specialty", "high_impact_specialty", "elite_general"}
+    assert "scores" in payload
+
+
 def test_cli_config_set_supports_emails(tmp_path, tmp_config_dir, monkeypatch, capsys):
     monkeypatch.setattr("sn_lib.config._dotenv_path", lambda: tmp_path / ".env")
     assert main(["config", "set", "--key", "openalex_email", "--value", "me@example.org"]) == 0
