@@ -62,6 +62,20 @@ def test_summarize_bucketed_groups_targets_and_avoids():
     assert summary["top"][0]["bucket"] == "stretch"
 
 
+def test_summarize_bucketed_keeps_broad_megajournal_as_safe_fallback():
+    broad = _v("Scientific Reports", ["biomedical machine learning"], 2.0, oa=True)
+    target = _v("BMC Medical Genomics", ["medical genomics", "machine learning"], 2.0, oa=True)
+    ranked = rank_venues(
+        ["biomedical machine learning"],
+        [broad, target],
+        ms_title="Machine Learning Prediction from Biomedical Data",
+        ms_abstract="We train classifiers on biomedical patient data.",
+    )
+    summary = summarize_bucketed(ranked, strategy="balanced", top_n=5)
+    broad_rows = [row for rows in summary["buckets"].values() for row in rows if row["journal"] == "Scientific Reports"]
+    assert broad_rows[0]["bucket"] in {"safe", "fallback"}
+
+
 def test_broad_journal_prestige_does_not_beat_scope_by_default():
     broad = _v("Cell", ["cancer research"], 25.0)
     specific = _v("BMC Bioinformatics", ["machine learning", "biomedicine", "toolkit"], 1.2, oa=True)
@@ -168,8 +182,9 @@ def test_biomedical_manuscript_penalizes_physical_science_ml_venue():
         ms_abstract="We analyzed patient omics data and trained machine learning classifiers.",
     )
     assert ranked[0].venue.name == "Computational and Structural Biotechnology Journal"
-    assert ranked[1].rationale["scope_fit"] <= 0.35
-    assert any("outside the manuscript" in reason for reason in ranked[1].rationale["risk_reasons"])
+    assert ranked[1].rationale["scope_fit"] <= 0.37
+    assert any("scope" in reason for reason in ranked[1].rationale["risk_reasons"])
+    assert any("scope" in reason for reason in ranked[1].rationale["risk_reasons"])
 
 
 def test_biomedical_manuscript_penalizes_social_geography_venue():
@@ -182,7 +197,22 @@ def test_biomedical_manuscript_penalizes_social_geography_venue():
         ms_abstract="We analyzed patient RNA sequencing data and trained machine learning classifiers.",
     )
     assert ranked[0].venue.name == "BMC Medical Genomics"
-    assert ranked[1].rationale["scope_fit"] <= 0.35
+    assert ranked[1].rationale["scope_fit"] <= 0.37
+    assert any("outside the manuscript" in reason for reason in ranked[1].rationale["risk_reasons"])
+
+
+def test_toxicology_manuscript_penalizes_off_topic_clinical_venue():
+    off_scope = _v("European Heart Journal", ["cardiology", "heart failure"], 3.0)
+    target = _v("Toxicological Sciences", ["toxicology", "drug safety"], 3.0)
+    ranked = rank_venues(
+        ["mitochondrial toxicity", "molecular fingerprints", "drug safety"],
+        [off_scope, target],
+        ms_title="Machine Learning for Interpretable Prediction of Mitochondrial Toxicity",
+        ms_abstract="We use molecular descriptors and machine learning to predict compound toxicity.",
+    )
+    assert ranked[0].venue.name == "Toxicological Sciences"
+    assert ranked[1].rationale["scope_fit"] <= 0.37
+    assert any("scope" in reason for reason in ranked[1].rationale["risk_reasons"])
 
 
 def test_biomedical_manuscript_penalizes_broad_engineering_proceedings():

@@ -155,7 +155,8 @@ def _scope_mismatch_adjustment(profile: ManuscriptProfile, venue: VenueHit, scop
         " ".join(profile.domains),
         ("clinical", "bioinformatics"),
     )
-    if not biomedical_profile:
+    toxicology_profile = "toxicology" in profile.domains
+    if not biomedical_profile and not toxicology_profile:
         return scope_fit, []
     biomedical_terms = (
         "health", "medicine", "medical", "clinical", "patient", "genetic", "genomic",
@@ -166,7 +167,8 @@ def _scope_mismatch_adjustment(profile: ManuscriptProfile, venue: VenueHit, scop
         "physical sciences", "materials science", "materials chemistry", "physics",
         "spectroscopy", "optical engineering", "remote-sensing", "ecology",
         "environmental dna", "food", "topic modeling", "natural language processing",
-        "information processing", "geography", "social sciences",
+        "information processing", "geography", "social sciences", "cardiology",
+        "heart failure", "nephrology", "aids", "hiv", "oncology", "hepatology",
     )
     off_scope_name_terms = (
         "computer physics", "information processing", "optical engineering",
@@ -176,6 +178,14 @@ def _scope_mismatch_adjustment(profile: ManuscriptProfile, venue: VenueHit, scop
         return min(scope_fit, 0.35), ["venue appears outside the manuscript's biomedical/genomic scope"]
     if _has_phrase(text, off_scope_terms) and not _has_phrase(text, biomedical_terms):
         return min(scope_fit, 0.35), ["venue appears outside the manuscript's biomedical/genomic scope"]
+    if toxicology_profile:
+        toxicology_terms = (
+            "toxicology", "toxicity", "toxicological", "drug safety", "pharmacology",
+            "cheminformatics", "chemical", "molecular", "compound", "bioinformatics",
+            "mitochondrial",
+        )
+        if _has_phrase(text, off_scope_terms) and not _has_phrase(text, toxicology_terms):
+            return min(scope_fit, 0.35), ["venue appears outside the manuscript's toxicology/cheminformatics scope"]
     return scope_fit, []
 
 

@@ -207,6 +207,10 @@ def _bucket_for(item: Ranked) -> tuple[str, str]:
         return "avoid", "high risk"
     if article_type_fit < 0.7 or any("outside the manuscript" in reason for reason in reasons):
         return "fallback", "scope or article-type caution"
+    if venue_band == "broad_megajournal":
+        if item.score >= 0.45:
+            return "safe", "broad fallback venue"
+        return "fallback", "broad low-confidence venue"
     if "exceeds contribution assessment" in ambition_reason and venue_band in {"elite_general", "top_clinical"}:
         return "avoid", "ambition mismatch"
     if "exceeds contribution assessment" in ambition_reason or "probably too ambitious" in ambition_reason:

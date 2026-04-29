@@ -185,6 +185,42 @@ def test_search_venues_falls_back_to_work_sources(tmp_config_dir, monkeypatch):
     assert hits[0].name == "Computational Toxicology"
     assert "Computational toxicology" in hits[0].concepts
     assert hits[0].evidence_count == 1
+    assert hits[0].specialty_domain in {"similar_works", "source_concepts"}
+    assert hits[0].specialty_confidence is not None
+
+
+@respx.mock
+def test_search_venues_boosts_repeated_similar_work_sources(tmp_config_dir, monkeypatch):
+    monkeypatch.delenv("ELSEVIER_API_KEY", raising=False)
+    monkeypatch.delenv("SCOPUS_KEY", raising=False)
+    monkeypatch.delenv("DOAJ_KEY", raising=False)
+    monkeypatch.delenv("CROSSREF_EMAIL", raising=False)
+    respx.get("https://api.openalex.org/sources").mock(
+        return_value=httpx.Response(200, json={"results": []})
+    )
+    respx.get("https://api.openalex.org/works").mock(
+        return_value=httpx.Response(200, json={"results": [
+            {
+                "primary_location": {"source": {"id": "S1", "display_name": "Journal of Widgets", "issn_l": "1111-1111", "type": "journal"}},
+                "primary_topic": {"display_name": "Widget optimization"},
+            },
+            {
+                "primary_location": {"source": {"id": "S1", "display_name": "Journal of Widgets", "issn_l": "1111-1111", "type": "journal"}},
+                "primary_topic": {"display_name": "Widget optimization"},
+            },
+        ]})
+    )
+    respx.get("https://api.crossref.org/journals/1111-1111").mock(
+        return_value=httpx.Response(404, json={"status": "resource not found"})
+    )
+    respx.get("https://api.elsevier.com/content/serial/title").mock(
+        return_value=httpx.Response(404, json={"service-error": {"status": {"statusCode": "NOT_FOUND"}}})
+    )
+    hits = search_venues("widget optimization", per_page=5)
+    assert hits[0].name == "Journal of Widgets"
+    assert hits[0].evidence_count == 2
+    assert hits[0].specialty_domain == "similar_works"
+    assert hits[0].specialty_confidence >= 0.6
 
 
 def test_merge_hits_combines_exact_name_specialty_seed_with_metadata():

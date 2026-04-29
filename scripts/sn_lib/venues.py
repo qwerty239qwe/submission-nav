@@ -166,7 +166,41 @@ def search_openalex_by_works(query: str, per_page: int = 50, venue_types: tuple[
         ):
             if not row[key] and fallback:
                 row[key] = fallback
-    return [VenueHit(**row) for row in grouped.values()]
+    hits = [VenueHit(**row) for row in grouped.values()]
+    max_evidence = max((hit.evidence_count for hit in hits), default=0)
+    for hit in hits:
+        if hit.evidence_count >= 2:
+            hit.specialty_domain = "similar_works"
+            hit.specialty_confidence = min(0.90, 0.42 + 0.12 * hit.evidence_count)
+        elif max_evidence == 1 and hit.evidence_count == 1:
+            hit.specialty_domain = "similar_works"
+            hit.specialty_confidence = 0.38
+    return hits
+
+
+def _query_tokens(query: str) -> set[str]:
+    stop = {
+        "journal", "research", "study", "using", "based", "analysis", "method", "methods",
+        "data", "model", "models", "effect", "effects", "paper", "the", "and", "for",
+    }
+    return {token for token in re_split_words(query) if token not in stop and len(token) > 2}
+
+
+def re_split_words(text: str) -> list[str]:
+    import re
+
+    return re.findall(r"[a-z0-9]+", (text or "").casefold())
+
+
+def _source_specialty_confidence(query: str, hit: VenueHit) -> float:
+    tokens = _query_tokens(query)
+    if not tokens:
+        return 0.0
+    haystack = " ".join([hit.name or "", " ".join(hit.concepts)]).casefold()
+    matched = sum(1 for token in tokens if token in haystack)
+    if matched == 0:
+        return 0.0
+    return min(0.55, matched / max(len(tokens), 1) * 0.55)
 
 
 def _hit_key(hit: VenueHit) -> str:
@@ -406,6 +440,11 @@ def search_venues(query: str, per_page: int = 25, venue_types: tuple[str, ...] =
         search_openalex_by_works(query, per_page=max(50, per_page), venue_types=venue_types),
         search_openalex(query, per_page=per_page, venue_types=venue_types),
     )
+    for hit in hits:
+        source_confidence = _source_specialty_confidence(query, hit)
+        if source_confidence > (hit.specialty_confidence or 0.0):
+            hit.specialty_confidence = source_confidence
+            hit.specialty_domain = "source_concepts"
     for idx, h in enumerate(hits):
         if idx >= ELSEVIER_ENRICH_TOP_N:
             break
