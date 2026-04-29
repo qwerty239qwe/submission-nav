@@ -10,6 +10,8 @@ from pathlib import Path
 import httpx
 from docx import Document
 
+from sn_lib.config import Config
+
 
 OPENALEX_WORKS = "https://api.openalex.org/works"
 OPENALEX_SOURCES = "https://api.openalex.org/sources"
@@ -127,7 +129,19 @@ def fetch_candidates(
         "per-page": per_page,
         "sort": "cited_by_count:desc",
     }
-    data = httpx.get(OPENALEX_WORKS, params=params, timeout=30).json()
+    openalex_mailto = Config.load().key("openalex_email")
+    if openalex_mailto:
+        params["mailto"] = openalex_mailto
+    response = httpx.get(OPENALEX_WORKS, params=params, timeout=30)
+    if response.status_code != 200:
+        message = response.text[:500]
+        try:
+            payload = response.json()
+            message = payload.get("message") or payload.get("error") or message
+        except ValueError:
+            pass
+        raise RuntimeError(f"OpenAlex works fetch failed: HTTP {response.status_code}: {message}")
+    data = response.json()
     works = data.get("results") or []
     enrich_source_impacts(works)
     return works
@@ -248,7 +262,20 @@ def main() -> int:
         (out_dir / "manifest.json").write_text(json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8")
 
     for field in args.fields:
-        works = fetch_candidates(FIELDS[field], from_date=args.from_date, to_date=args.to_date)
+        try:
+            works = fetch_candidates(FIELDS[field], from_date=args.from_date, to_date=args.to_date)
+        except RuntimeError as exc:
+            for tier in args.tiers:
+                results.append({
+                    "field": field,
+                    "tier_proxy": tier,
+                    "from_date": args.from_date,
+                    "to_date": args.to_date,
+                    "error": "fetch_candidates_failed",
+                    "stderr": str(exc)[:1000],
+                })
+            flush_outputs()
+            continue
         for tier in args.tiers:
             work = pick_work(works, field, tier)
             if not work:

@@ -27,3 +27,18 @@ def test_fetch_candidates_applies_publication_window():
         "type:article,has_abstract:true,primary_location.source.type:journal,"
         "from_publication_date:2021-04-30,to_publication_date:2026-04-30"
     )
+
+
+@respx.mock
+def test_fetch_candidates_raises_on_openalex_error():
+    respx.get("https://api.openalex.org/works").mock(
+        return_value=httpx.Response(429, json={"message": "Rate limit exceeded"})
+    )
+
+    try:
+        fetch_candidates("widget science", from_date="2021-01-01", to_date="2026-04-30")
+    except RuntimeError as exc:
+        assert "HTTP 429" in str(exc)
+        assert "Rate limit exceeded" in str(exc)
+    else:
+        raise AssertionError("expected RuntimeError")
