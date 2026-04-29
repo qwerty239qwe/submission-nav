@@ -1,65 +1,29 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+import re
 
 from .venues import VenueHit
 
 
-@dataclass(frozen=True)
-class SpecialtySeed:
-    journal: str
-    domain: str
-    confidence: float
-    concepts: tuple[str, ...]
-
-
-SPECIALTY_SEEDS: dict[str, tuple[SpecialtySeed, ...]] = {
-    "mitochondrial_disease": (
-        SpecialtySeed("Mitochondrion", "mitochondrial_disease", 0.96, ("mitochondrial disease", "mitochondria")),
-        SpecialtySeed("Journal of Inherited Metabolic Disease", "mitochondrial_disease", 0.88, ("inherited metabolic disease", "rare disease")),
-        SpecialtySeed("Molecular Genetics and Metabolism", "mitochondrial_disease", 0.84, ("metabolic disease", "genetics")),
-        SpecialtySeed("Orphanet Journal of Rare Diseases", "mitochondrial_disease", 0.76, ("rare disease", "clinical genetics")),
-    ),
-    "clinical_genomics": (
-        SpecialtySeed("BMC Medical Genomics", "clinical_genomics", 0.88, ("medical genomics", "clinical genomics")),
-        SpecialtySeed("Human Molecular Genetics", "clinical_genomics", 0.82, ("human genetics", "genomics")),
-        SpecialtySeed("Journal of Medical Genetics", "clinical_genomics", 0.82, ("medical genetics", "clinical genomics")),
-        SpecialtySeed("Genetics in Medicine", "clinical_genomics", 0.76, ("medical genetics", "clinical diagnosis")),
-    ),
-    "bioinformatics_transcriptomics": (
-        SpecialtySeed("BMC Bioinformatics", "bioinformatics_transcriptomics", 0.84, ("bioinformatics", "machine learning")),
-        SpecialtySeed("Briefings in Bioinformatics", "bioinformatics_transcriptomics", 0.74, ("bioinformatics", "computational biology")),
-        SpecialtySeed("Computational and Structural Biotechnology Journal", "bioinformatics_transcriptomics", 0.72, ("computational biology", "biotechnology")),
-        SpecialtySeed("GigaScience", "bioinformatics_transcriptomics", 0.68, ("data science", "genomics")),
-    ),
-    "computational_toxicology": (
-        SpecialtySeed("Computational Toxicology", "computational_toxicology", 0.94, ("computational toxicology", "toxicity prediction")),
-        SpecialtySeed("Toxicology in Vitro", "computational_toxicology", 0.72, ("toxicology", "in vitro")),
-        SpecialtySeed("Chemical Research in Toxicology", "computational_toxicology", 0.72, ("chemical toxicology", "molecular toxicology")),
-    ),
+GENERIC_DOMAINS = {
+    "toxicology": ("toxicity", "toxicology", "toxicological", "drug safety"),
+    "cheminformatics": ("cheminformatics", "molecular descriptor", "molecular fingerprint", "qsar"),
+    "pharmacology": ("pharmacology", "drug discovery", "drug development"),
+    "bioinformatics": ("bioinformatics", "genomics", "transcriptomics", "omics"),
+    "machine_learning": ("machine learning", "deep learning", "classifier", "prediction"),
+    "clinical": ("patient", "clinical", "diagnosis", "prognosis"),
+    "engineering": ("engineering", "materials", "mechanical", "electrical", "civil"),
+    "computer_science": ("computer science", "algorithm", "software", "network", "computing"),
+    "environmental_science": ("environmental", "ecology", "climate", "biodiversity"),
+    "social_science": ("social", "psychology", "sociology", "education", "policy"),
+    "chemistry": ("chemistry", "chemical", "synthesis", "catalysis", "molecule"),
+    "physics": ("physics", "quantum", "optical", "particle", "condensed matter"),
 }
 
 
-QUERY_TEMPLATES: dict[str, tuple[str, ...]] = {
-    "mitochondrial_disease": (
-        "mitochondrial disease journal",
-        "inherited metabolic disease journal",
-        "rare disease genomics journal",
-    ),
-    "clinical_genomics": (
-        "clinical genomics journal",
-        "medical genomics transcriptomics journal",
-        "genetic diagnosis journal",
-    ),
-    "bioinformatics_transcriptomics": (
-        "bioinformatics transcriptomics journal",
-        "RNA sequencing machine learning journal",
-        "computational biology clinical prediction journal",
-    ),
-    "computational_toxicology": (
-        "computational toxicology journal",
-        "toxicity prediction machine learning journal",
-    ),
+STOPWORDS = {
+    "title", "abstract", "study", "using", "based", "analysis", "results", "method", "methods",
+    "effect", "effects", "data", "model", "models", "new", "novel", "research", "paper",
 }
 
 
@@ -78,6 +42,7 @@ def _context(manuscript_summary: dict, profile: dict, concepts_payload: dict) ->
         manuscript_summary.get("abstract"),
         " ".join(manuscript_summary.get("section_headings") or []),
         " ".join(concepts),
+        " ".join(profile.get("domains") or []),
         profile.get("data_type"),
         profile.get("claims_level"),
         profile.get("method_novelty"),
@@ -85,18 +50,34 @@ def _context(manuscript_summary: dict, profile: dict, concepts_payload: dict) ->
     return _norm(" ".join(field for field in fields if field))
 
 
+def _clean_phrase(value: str) -> str:
+    text = re.sub(r"[^a-zA-Z0-9\s-]+", " ", value or "")
+    words = [word for word in text.casefold().split() if word not in STOPWORDS and len(word) > 2]
+    return " ".join(words[:6]).strip()
+
+
+def _top_phrases(manuscript_summary: dict, concepts_payload: dict, limit: int = 8) -> list[str]:
+    phrases: list[str] = []
+    for raw in concepts_payload.get("concepts") or []:
+        phrase = _clean_phrase(raw)
+        if phrase and phrase not in phrases:
+            phrases.append(phrase)
+    title = _clean_phrase(manuscript_summary.get("title") or "")
+    if title and title not in phrases:
+        phrases.append(title)
+    return phrases[:limit]
+
+
 def detect_specialties(manuscript_summary: dict, profile: dict, concepts_payload: dict) -> list[str]:
     text = _context(manuscript_summary, profile, concepts_payload)
     domains: list[str] = []
-    if _has_any(text, ("mitochondrial disease", "mitochondria", "mitochondrial")):
-        domains.append("mitochondrial_disease")
-    if _has_any(text, ("genomics", "transcriptomics", "rna-seq", "rna sequencing", "genetic diagnosis", "whole-blood rna")):
-        domains.append("clinical_genomics")
-    if _has_any(text, ("machine learning", "classifier", "prediction", "bioinformatics", "transcriptomics", "rna-seq")):
-        domains.append("bioinformatics_transcriptomics")
-    if _has_any(text, ("toxicity", "toxicology", "molecular descriptor", "fingerprint", "compound")):
-        domains.append("computational_toxicology")
-    return domains
+    for domain in profile.get("domains") or []:
+        if domain and domain not in domains:
+            domains.append(domain)
+    for domain, terms in GENERIC_DOMAINS.items():
+        if domain not in domains and _has_any(text, terms):
+            domains.append(domain)
+    return domains or ["general"]
 
 
 def build_specialty_plan(
@@ -106,47 +87,26 @@ def build_specialty_plan(
     broad: bool = False,
 ) -> dict:
     domains = detect_specialties(manuscript_summary, profile, concepts_payload)
+    phrases = _top_phrases(manuscript_summary, concepts_payload, limit=10 if broad else 6)
     queries: list[str] = []
-    seeds: list[dict] = []
-    for domain in domains:
-        for query in QUERY_TEMPLATES.get(domain, ()):
+    for phrase in phrases:
+        for suffix in ("journal", "research journal"):
+            query = f"{phrase} {suffix}"
             if query not in queries:
                 queries.append(query)
-        for seed in SPECIALTY_SEEDS.get(domain, ()):
-            seeds.append({
-                "journal": seed.journal,
-                "domain": seed.domain,
-                "confidence": seed.confidence,
-                "concepts": list(seed.concepts),
-            })
-    if not broad:
-        queries = queries[:6]
-        seeds = seeds[:12]
-    return {"domains": domains, "queries": queries, "seed_journals": seeds}
+    for domain in domains[:5 if broad else 3]:
+        label = domain.replace("_", " ")
+        query = f"{label} journal"
+        if query not in queries:
+            queries.append(query)
+    query_limit = 12 if broad else 6
+    return {
+        "domains": domains,
+        "queries": queries[:query_limit],
+        "seed_journals": [],
+        "seed_policy": "disabled; candidates are discovered dynamically from manuscript-derived venue queries",
+    }
 
 
 def seed_venues_from_plan(plan: dict) -> list[VenueHit]:
-    hits: list[VenueHit] = []
-    for row in plan.get("seed_journals") or []:
-        journal = row.get("journal")
-        domain = row.get("domain")
-        concepts = row.get("concepts") or []
-        if not journal or not domain:
-            continue
-        hits.append(VenueHit(
-            id=f"specialty:{domain}:{journal.casefold()}",
-            name=journal,
-            issn=None,
-            publisher=None,
-            is_oa=None,
-            apc_usd=None,
-            impact_proxy=None,
-            h_index=None,
-            concepts=concepts,
-            source="specialty-seed",
-            venue_type="journal",
-            evidence_count=1,
-            specialty_domain=domain,
-            specialty_confidence=float(row.get("confidence") or 0.0),
-        ))
-    return hits
+    return []

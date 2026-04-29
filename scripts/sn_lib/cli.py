@@ -274,19 +274,27 @@ def _cmd_strategist(args) -> int:
         journal = row.get("journal")
         if journal and journal not in queries:
             queries.append(journal)
+    current_venue_files: list[str] = []
     if not args.venues_json:
         for query in queries:
+            out_path = run.run_dir / query_filename(query)
             venue_args = argparse.Namespace(
                 query=query,
                 per_page=args.per_page,
                 venue_types=args.venue_types,
-                out=None,
+                out=str(out_path),
                 run_dir=str(run.run_dir),
                 manuscript=args.manuscript,
                 force=args.force,
             )
             _cmd_venues(venue_args)
-    _cmd_rank(args)
+            current_venue_files.append(str(out_path))
+        if run.specialty_venues.exists():
+            current_venue_files.append(str(run.specialty_venues))
+    rank_args = argparse.Namespace(**vars(args))
+    if current_venue_files:
+        rank_args.venues_json = current_venue_files
+    _cmd_rank(rank_args)
     suffix = strategy_suffix(args.strategy, args.oa_preference)
     agent_out = run.run_dir / f"ranked_agent_{suffix}.json"
     _print_ok("strategist", agent_out)
