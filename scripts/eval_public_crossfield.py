@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+from datetime import date
 import json
 import subprocess
 import time
@@ -41,6 +42,11 @@ TIERS = {
     "middle": (1.5, 5.0),
     "low": (0.0, 1.5),
 }
+
+
+def default_from_date(today: date | None = None) -> str:
+    today = today or date.today()
+    return date(today.year - 5, today.month, today.day).isoformat()
 
 
 def _abstract(index: dict | None) -> str:
@@ -100,10 +106,20 @@ def _in_tier(impact: float, tier: str) -> bool:
     return low <= impact < high
 
 
-def fetch_candidates(query: str, per_page: int = 200) -> list[dict]:
+def fetch_candidates(
+    query: str,
+    per_page: int = 200,
+    from_date: str | None = None,
+    to_date: str | None = None,
+) -> list[dict]:
+    filters = ["type:article", "has_abstract:true", "primary_location.source.type:journal"]
+    if from_date:
+        filters.append(f"from_publication_date:{from_date}")
+    if to_date:
+        filters.append(f"to_publication_date:{to_date}")
     params = {
         "search": query,
-        "filter": "type:article,has_abstract:true,primary_location.source.type:journal",
+        "filter": ",".join(filters),
         "per-page": per_page,
         "sort": "cited_by_count:desc",
     }
@@ -189,6 +205,8 @@ def summarize_run(run_dir: Path, work: dict, field: str, tier: str, elapsed: flo
         "field": field,
         "tier_proxy": tier,
         "paper_title": work.get("title"),
+        "publication_year": work.get("publication_year"),
+        "publication_date": work.get("publication_date"),
         "published_venue": published,
         "published_venue_impact_proxy": _impact(work),
         "published_venue_in_top10": published in top_names,
@@ -209,6 +227,10 @@ def main() -> int:
     ap.add_argument("--out-dir", default="temp_sn/public_crossfield_eval")
     ap.add_argument("--fields", nargs="*", default=list(FIELDS))
     ap.add_argument("--tiers", nargs="*", default=list(TIERS))
+    ap.add_argument("--from-date", default=default_from_date(),
+                    help="Earliest publication date for sampled OpenAlex works. Defaults to five years ago.")
+    ap.add_argument("--to-date", default=None,
+                    help="Latest publication date for sampled OpenAlex works.")
     args = ap.parse_args()
 
     repo = Path(__file__).resolve().parents[1]
@@ -217,11 +239,17 @@ def main() -> int:
     manifest: list[dict] = []
     results: list[dict] = []
     for field in args.fields:
-        works = fetch_candidates(FIELDS[field])
+        works = fetch_candidates(FIELDS[field], from_date=args.from_date, to_date=args.to_date)
         for tier in args.tiers:
             work = pick_work(works, field, tier)
             if not work:
-                results.append({"field": field, "tier_proxy": tier, "error": "no OpenAlex work found for tier proxy"})
+                results.append({
+                    "field": field,
+                    "tier_proxy": tier,
+                    "from_date": args.from_date,
+                    "to_date": args.to_date,
+                    "error": "no OpenAlex work found for tier proxy",
+                })
                 continue
             case_dir = out_dir / f"{field}_{tier}"
             case_dir.mkdir(parents=True, exist_ok=True)
@@ -232,8 +260,21 @@ def main() -> int:
             returncode, elapsed, stdout, stderr = run_skill(repo, manuscript, run_dir)
             (case_dir / "stdout.txt").write_text(stdout, encoding="utf-8")
             (case_dir / "stderr.txt").write_text(stderr, encoding="utf-8")
-            manifest.append({"field": field, "tier_proxy": tier, "work_id": work.get("id"), "manuscript": str(manuscript), "run_dir": str(run_dir)})
-            results.append(summarize_run(run_dir, work, field, tier, elapsed, returncode, stderr))
+            manifest.append({
+                "field": field,
+                "tier_proxy": tier,
+                "work_id": work.get("id"),
+                "publication_year": work.get("publication_year"),
+                "publication_date": work.get("publication_date"),
+                "from_date": args.from_date,
+                "to_date": args.to_date,
+                "manuscript": str(manuscript),
+                "run_dir": str(run_dir),
+            })
+            result = summarize_run(run_dir, work, field, tier, elapsed, returncode, stderr)
+            result["from_date"] = args.from_date
+            result["to_date"] = args.to_date
+            results.append(result)
             (out_dir / "results.json").write_text(json.dumps(results, indent=2, ensure_ascii=False), encoding="utf-8")
             (out_dir / "manifest.json").write_text(json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8")
     return 0
