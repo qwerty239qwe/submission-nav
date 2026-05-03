@@ -11,6 +11,7 @@ import httpx
 from docx import Document
 
 from sn_lib.config import Config
+from sn_lib.eval_quality import summarize_rank_quality
 
 
 OPENALEX_WORKS = "https://api.openalex.org/works"
@@ -219,6 +220,8 @@ def summarize_run(run_dir: Path, work: dict, field: str, tier: str, elapsed: flo
     published = source.get("display_name")
     top = ranked.get("top") or []
     top_names = [row.get("journal") for row in top[:10]]
+    top5_quality = summarize_rank_quality(top, top_n=5)
+    top10_quality = summarize_rank_quality(top, top_n=10)
     return {
         "field": field,
         "tier_proxy": tier,
@@ -229,6 +232,8 @@ def summarize_run(run_dir: Path, work: dict, field: str, tier: str, elapsed: flo
         "published_venue_impact_proxy": _impact(work),
         "published_venue_in_top10": published in top_names,
         "top_recommendations": top_names,
+        "top5_quality": top5_quality,
+        "top10_quality": top10_quality,
         "contribution_tier": contribution.get("contribution_tier"),
         "ambition_band": contribution.get("ambition_band"),
         "bucket_counts": ranked.get("counts"),

@@ -6,6 +6,7 @@ import statistics
 from pathlib import Path
 
 from sn_lib.concepts import derive_from_summary
+from sn_lib.eval_quality import summarize_rank_quality
 from sn_lib.parse import parse_manuscript
 from sn_lib.ranking import rank_venues
 from sn_lib.venues import search_venues
@@ -62,7 +63,27 @@ def _metrics(results: list[dict]) -> dict:
         }
     ranks = [row["published_rank"] for row in results if row["published_rank"] is not None]
     reciprocal_ranks = [(1 / row["published_rank"]) if row["published_rank"] else 0.0 for row in results]
-    return {
+    quality_rows = [row for row in results if row.get("top5_quality")]
+    quality = {
+        "top5_article_type_mismatch_rate": 0.0,
+        "top5_high_risk_rate": 0.0,
+        "top5_scope_caution_rate": 0.0,
+        "top5_broad_megajournal_rate": 0.0,
+        "top5_contaminated_case_rate": 0.0,
+    }
+    if quality_rows:
+        for metric, key in (
+            ("top5_article_type_mismatch_rate", "article_type_mismatch"),
+            ("top5_high_risk_rate", "high_risk"),
+            ("top5_scope_caution_rate", "scope_caution"),
+            ("top5_broad_megajournal_rate", "broad_megajournal"),
+        ):
+            quality[metric] = round(sum(row["top5_quality"]["rates"][key] for row in quality_rows) / len(quality_rows), 3)
+        quality["top5_contaminated_case_rate"] = round(
+            sum(row["top5_quality"]["has_contamination"] for row in quality_rows) / len(quality_rows),
+            3,
+        )
+    metrics = {
         "papers": n,
         "retrieval_recall": round(sum(row["retrieved"] for row in results) / n, 3),
         "ranked_recall": round(sum(row["published_rank"] is not None for row in results) / n, 3),
@@ -73,6 +94,8 @@ def _metrics(results: list[dict]) -> dict:
         "mrr": round(sum(reciprocal_ranks) / n, 3),
         "median_rank": statistics.median(ranks) if ranks else None,
     }
+    metrics.update(quality)
+    return metrics
 
 
 def _markdown_report(summary: dict) -> str:
@@ -91,6 +114,11 @@ def _markdown_report(summary: dict) -> str:
         f"- hit@10: `{metrics['hit_at_10']}`",
         f"- MRR: `{metrics['mrr']}`",
         f"- median rank: `{metrics['median_rank']}`",
+        f"- top5 article-type mismatch rate: `{metrics['top5_article_type_mismatch_rate']}`",
+        f"- top5 high-risk rate: `{metrics['top5_high_risk_rate']}`",
+        f"- top5 scope-caution rate: `{metrics['top5_scope_caution_rate']}`",
+        f"- top5 broad-megajournal rate: `{metrics['top5_broad_megajournal_rate']}`",
+        f"- top5 contaminated-case rate: `{metrics['top5_contaminated_case_rate']}`",
         "",
         "## Cases",
         "",
@@ -150,6 +178,7 @@ def evaluate(manifest_path: Path, out_dir: Path, per_page: int = 40, default_ven
         )
         retrieval_rank = _rank_of_expected(merged_hits, expected_names)
         published_rank = _rank_of_expected(ranked, expected_names)
+        top10_summary = [item.to_summary_dict() for item in ranked[:10]]
 
         payload = {
             "paper": row["paper"],
@@ -165,6 +194,9 @@ def evaluate(manifest_path: Path, out_dir: Path, per_page: int = 40, default_ven
             "published_rank": published_rank,
             "top10_contains_published": published_rank is not None and published_rank <= 10,
             "top10": [item.venue.name for item in ranked[:10]],
+            "top10_details": top10_summary,
+            "top5_quality": summarize_rank_quality(top10_summary, top_n=5),
+            "top10_quality": summarize_rank_quality(top10_summary, top_n=10),
         }
         results.append(payload)
         (out_dir / f'{row["paper"]}_eval.json').write_text(
