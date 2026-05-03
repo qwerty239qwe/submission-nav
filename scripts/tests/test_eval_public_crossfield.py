@@ -3,7 +3,7 @@ from datetime import date
 import httpx
 import respx
 
-from eval_public_crossfield import default_from_date, default_to_date, fetch_candidates
+from eval_public_crossfield import default_from_date, default_to_date, fetch_candidates, _matches_field
 
 
 def test_default_from_date_uses_five_year_window():
@@ -42,3 +42,27 @@ def test_fetch_candidates_raises_on_openalex_error():
         assert "Rate limit exceeded" in str(exc)
     else:
         raise AssertionError("expected RuntimeError")
+
+
+def test_matches_field_prefers_openalex_topic_metadata_when_available():
+    work = {
+        "title": "Machine learning for molecular synthesis",
+        "abstract_inverted_index": {"machine": [0], "learning": [1], "molecule": [2]},
+        "primary_topic": {
+            "display_name": "Chemical synthesis",
+            "field": {"display_name": "Chemistry"},
+            "domain": {"display_name": "Physical sciences"},
+        },
+    }
+
+    assert _matches_field(work, "chemistry") is True
+    assert _matches_field(work, "computer_science") is False
+
+
+def test_matches_field_falls_back_to_text_without_topics():
+    work = {
+        "title": "Machine learning algorithm for neural network optimization",
+        "abstract_inverted_index": None,
+    }
+
+    assert _matches_field(work, "computer_science") is True

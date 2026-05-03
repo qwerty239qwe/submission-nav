@@ -40,6 +40,17 @@ FIELD_REQUIRED = {
 }
 
 
+FIELD_TOPIC_TERMS = {
+    "life_sciences_medicine": ("medicine", "clinical medicine", "health sciences", "biology", "genetics"),
+    "engineering": ("engineering", "materials science", "mechanical engineering", "electrical engineering"),
+    "computer_science": ("computer science", "artificial intelligence", "machine learning", "software"),
+    "environmental_sciences": ("environmental science", "earth sciences", "ecology", "climate"),
+    "social_sciences": ("social sciences", "psychology", "economics", "education", "political science"),
+    "chemistry": ("chemistry", "chemical", "materials chemistry", "organic chemistry"),
+    "physics": ("physics", "astronomy", "condensed matter", "optics", "quantum"),
+}
+
+
 TIERS = {
     "top": (5.0, None),
     "middle": (1.5, 5.0),
@@ -153,7 +164,37 @@ def _matches_field(work: dict, field: str) -> bool:
         work.get("title") or "",
         _abstract(work.get("abstract_inverted_index")),
     ]).casefold()
-    return any(term in haystack for term in FIELD_REQUIRED[field])
+    topic_text = _topic_text(work)
+    text_match = any(term in haystack for term in FIELD_REQUIRED[field])
+    topic_match = any(term in topic_text for term in FIELD_TOPIC_TERMS[field])
+    return topic_match or (text_match and not topic_text)
+
+
+def _topic_text(work: dict) -> str:
+    parts: list[str] = []
+    primary = work.get("primary_topic") or {}
+    for path in (
+        ("display_name",),
+        ("subfield", "display_name"),
+        ("field", "display_name"),
+        ("domain", "display_name"),
+    ):
+        cur = primary
+        for key in path:
+            if not isinstance(cur, dict):
+                cur = None
+                break
+            cur = cur.get(key)
+        if cur:
+            parts.append(str(cur))
+    for topic in work.get("topics") or []:
+        if topic.get("display_name"):
+            parts.append(topic["display_name"])
+        for key in ("subfield", "field", "domain"):
+            node = topic.get(key) or {}
+            if node.get("display_name"):
+                parts.append(node["display_name"])
+    return " ".join(parts).casefold()
 
 
 def pick_work(works: list[dict], field: str, tier: str) -> dict | None:
