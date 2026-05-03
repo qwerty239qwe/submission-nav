@@ -28,3 +28,9 @@ def test_summarize_rank_quality_reports_rates():
     assert summary["rates"]["article_type_mismatch"] == 0.5
     assert summary["rates"]["high_risk"] == 0.5
     assert summary["has_contamination"] is True
+
+
+def test_domain_gate_conflict_counts_as_scope_caution():
+    flags = item_quality_flags({"journal": "Wrong Community", "domain_gate": "conflict"})
+
+    assert flags["scope_caution"] is True

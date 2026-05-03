@@ -203,6 +203,20 @@ def test_biomedical_manuscript_penalizes_physical_science_ml_venue():
     assert any("scope" in reason for reason in ranked[1].rationale["risk_reasons"])
 
 
+def test_domain_gate_prevents_generic_method_journal_from_beating_application_journal():
+    method_only = _v("Machine Learning", ["artificial intelligence", "algorithms"], 8.0)
+    target = _v("Journal of Biomedical Informatics", ["machine learning", "health informatics"], 3.0)
+    ranked = rank_venues(
+        ["biomedical machine learning", "clinical prediction", "patient cohort"],
+        [method_only, target],
+        ms_title="Machine learning prediction from clinical records",
+        ms_abstract="We trained and validated models in a patient cohort.",
+    )
+    assert ranked[0].venue.name == "Journal of Biomedical Informatics"
+    assert ranked[1].rationale["domain_gate"] == "method_only_match"
+    assert ranked[1].score <= 0.45
+
+
 def test_biomedical_manuscript_penalizes_social_geography_venue():
     off_scope = _v("Social & Cultural Geography", ["geography", "social sciences"], 2.0)
     target = _v("BMC Medical Genomics", ["medical genomics", "transcriptomics"], 2.0, oa=True)

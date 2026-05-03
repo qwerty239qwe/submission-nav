@@ -3,6 +3,7 @@ from dataclasses import dataclass, asdict
 from rapidfuzz import fuzz
 from .cli import emit_json
 from .contribution import ambition_alignment, ambition_cap, classify_venue_ambition
+from .domain_gate import apply_domain_gate, assess_domain_compatibility
 from .suitability import infer_manuscript_profile, score_suitability
 from .venues import VenueHit
 
@@ -42,6 +43,8 @@ class Ranked:
             "venue_ambition_band": self.rationale.get("venue_ambition_band"),
             "contribution_tier": self.rationale.get("contribution_tier"),
             "ambition_reason": self.rationale.get("ambition_reason"),
+            "domain_gate": self.rationale.get("domain_gate"),
+            "domain_gate_reasons": self.rationale.get("domain_gate_reasons", []),
             "rationale": self.rationale,
         }
 
@@ -140,8 +143,11 @@ def rank_venues(
         )
         venue_band = classify_venue_ambition(v)
         ambition_delta, contribution_tier, ambition_reason = ambition_alignment(contribution_assessment, venue_band)
-        score = ambition_cap(contribution_assessment, venue_band, suitability.strategy_score + ambition_delta)
+        uncapped_score = ambition_cap(contribution_assessment, venue_band, suitability.strategy_score + ambition_delta)
+        domain_gate = assess_domain_compatibility(ms_concepts, ms_title, ms_abstract, profile, v)
+        score = apply_domain_gate(uncapped_score, domain_gate)
         suitability_payload = suitability.to_dict()
+        domain_gate_payload = domain_gate.to_dict()
         out.append(Ranked(v, round(score, 4), {
             "strategy": strategy,
             "fit": round(fit, 3),
@@ -157,6 +163,7 @@ def rank_venues(
             "raw_score": round(raw_score, 4),
             "suitability_score": suitability_payload["score"],
             "strategy_score": suitability_payload["strategy_score"],
+            "pre_domain_gate_score": round(uncapped_score, 4),
             "scope_fit": suitability_payload["scope_fit"],
             "article_type_fit": suitability_payload["article_type_fit"],
             "cost_fit": suitability_payload["cost_fit"],
@@ -170,6 +177,13 @@ def rank_venues(
             "contribution_tier": contribution_tier,
             "ambition_delta": round(ambition_delta, 3),
             "ambition_reason": ambition_reason,
+            "domain_gate": domain_gate_payload["label"],
+            "domain_gate_score_cap": domain_gate_payload["score_cap"],
+            "domain_gate_penalty": domain_gate_payload["penalty"],
+            "domain_gate_reasons": domain_gate_payload["reasons"],
+            "manuscript_domains": domain_gate_payload["manuscript_domains"],
+            "venue_domains": domain_gate_payload["venue_domains"],
+            "method_domains": domain_gate_payload["method_domains"],
             "manuscript_profile": suitability_payload["profile"],
         }))
     out.sort(key=lambda r: r.score, reverse=True)

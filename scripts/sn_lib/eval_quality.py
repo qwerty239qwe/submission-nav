@@ -21,6 +21,7 @@ def item_quality_flags(item: dict) -> dict:
     scope_fit = item.get("rationale", {}).get("scope_fit", item.get("scope_fit"))
     bucket = item.get("bucket")
     venue_band = item.get("venue_ambition_band")
+    domain_gate = item.get("domain_gate") or item.get("rationale", {}).get("domain_gate")
     return {
         "article_type_mismatch": (
             (article_type_fit is not None and article_type_fit < 0.7)
@@ -31,6 +32,7 @@ def item_quality_flags(item: dict) -> dict:
             (scope_fit is not None and scope_fit < 0.4)
             or "outside the manuscript" in reasons
             or "weak scope evidence" in reasons
+            or domain_gate in {"conflict", "method_only_match"}
         ),
         "broad_megajournal": venue_band == "broad_megajournal" or journal in MEGAJOURNALS,
     }
