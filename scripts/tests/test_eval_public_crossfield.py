@@ -44,6 +44,18 @@ def test_fetch_candidates_raises_on_openalex_error():
         raise AssertionError("expected RuntimeError")
 
 
+@respx.mock
+def test_fetch_candidates_raises_on_openalex_timeout():
+    respx.get("https://api.openalex.org/works").mock(side_effect=httpx.ReadTimeout("timed out"))
+
+    try:
+        fetch_candidates("widget science", from_date="2021-01-01", to_date="2026-04-30")
+    except RuntimeError as exc:
+        assert "ReadTimeout" in str(exc)
+    else:
+        raise AssertionError("expected RuntimeError")
+
+
 def test_matches_field_prefers_openalex_topic_metadata_when_available():
     work = {
         "title": "Machine learning for molecular synthesis",

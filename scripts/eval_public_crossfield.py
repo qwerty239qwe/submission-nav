@@ -144,7 +144,10 @@ def fetch_candidates(
     openalex_mailto = Config.load().key("openalex_email")
     if openalex_mailto:
         params["mailto"] = openalex_mailto
-    response = httpx.get(OPENALEX_WORKS, params=params, timeout=30)
+    try:
+        response = httpx.get(OPENALEX_WORKS, params=params, timeout=30)
+    except httpx.HTTPError as exc:
+        raise RuntimeError(f"OpenAlex works fetch failed: {type(exc).__name__}: {exc}") from exc
     if response.status_code != 200:
         message = response.text[:500]
         try:
