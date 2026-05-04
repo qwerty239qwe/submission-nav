@@ -212,6 +212,7 @@ def _bucket_for(item: Ranked) -> tuple[str, str]:
     publisher_label = rationale.get("publisher_risk_label")
     venue_band = rationale.get("venue_ambition_band")
     ambition_reason = rationale.get("ambition_reason") or ""
+    domain_gate = rationale.get("domain_gate")
     impact = _impact(item.venue.impact_proxy)
     if publisher_label in {"potential_predatory_match", "hijacked_or_identity_risk"}:
         return "avoid", "publisher integrity risk"
@@ -221,6 +222,10 @@ def _bucket_for(item: Ranked) -> tuple[str, str]:
         return "avoid", "high risk"
     if article_type_fit < 0.7 or any("outside the manuscript" in reason for reason in reasons):
         return "fallback", "scope or article-type caution"
+    if domain_gate in {"conflict", "method_only_match"}:
+        return "fallback", "domain-community caution"
+    if domain_gate == "adjacent" and item.score < 0.50:
+        return "fallback", "adjacent-domain low-confidence venue"
     if venue_band == "broad_megajournal":
         if item.score >= 0.45:
             return "safe", "broad fallback venue"

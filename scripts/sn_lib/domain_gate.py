@@ -16,7 +16,7 @@ DOMAIN_TERMS = {
         "cancer", "cardiology", "neurology", "hematology",
     ),
     "chemistry": (
-        "chemistry", "chemical", "molecule", "molecular", "synthesis", "catalysis",
+        "chemistry", "chemical", "molecule", "synthesis", "catalysis",
         "compound", "organic", "inorganic", "cheminformatics", "toxicology", "drug",
         "pharmacology",
     ),
@@ -122,7 +122,7 @@ def _is_application_aware_method_venue(venue_text: str, manuscript_domains: set[
     )):
         return True
     if "chemistry" in manuscript_domains and any(term in venue_text for term in (
-        "chemical", "chemistry", "molecular", "cheminformatics",
+        "chemical", "chemistry", "cheminformatics",
     )):
         return True
     if "environmental" in manuscript_domains and "environment" in venue_text:

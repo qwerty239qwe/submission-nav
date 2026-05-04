@@ -72,3 +72,22 @@ def test_domain_gate_marks_cross_community_conflict():
 
     assert gate.label == "conflict"
     assert gate.score_cap == 0.35
+
+
+def test_domain_gate_does_not_treat_molecular_biology_as_chemistry_venue():
+    concepts = ["organic synthesis", "catalysis"]
+    profile = infer_manuscript_profile(
+        concepts,
+        title="Catalytic synthesis of organic molecules",
+        abstract="We report chemical synthesis and catalysis.",
+    )
+    gate = assess_domain_compatibility(
+        concepts,
+        "Catalytic synthesis of organic molecules",
+        "We report chemical synthesis and catalysis.",
+        profile,
+        _venue("Genome Research", ["molecular biology", "genomics"]),
+    )
+
+    assert gate.label in {"adjacent", "conflict"}
+    assert "chemistry" not in gate.venue_domains

@@ -217,6 +217,21 @@ def test_domain_gate_prevents_generic_method_journal_from_beating_application_jo
     assert ranked[1].score <= 0.45
 
 
+def test_bucketed_summary_keeps_domain_conflicts_out_of_target_buckets():
+    conflict = _v("Journal of Health Psychology", ["psychology", "social science"], 10.0)
+    target = _v("ACS Catalysis", ["chemistry", "catalysis"], 3.0)
+    ranked = rank_venues(
+        ["organic synthesis", "catalysis"],
+        [conflict, target],
+        ms_title="Catalytic synthesis of organic molecules",
+        ms_abstract="We report chemical synthesis and catalysis.",
+    )
+    summary = summarize_bucketed(ranked, strategy="balanced", top_n=5)
+    conflict_rows = [row for rows in summary["buckets"].values() for row in rows if row["journal"] == "Journal of Health Psychology"]
+    assert conflict_rows[0]["bucket"] == "fallback"
+    assert summary["top"][0]["journal"] == "ACS Catalysis"
+
+
 def test_biomedical_manuscript_penalizes_social_geography_venue():
     off_scope = _v("Social & Cultural Geography", ["geography", "social sciences"], 2.0)
     target = _v("BMC Medical Genomics", ["medical genomics", "transcriptomics"], 2.0, oa=True)
