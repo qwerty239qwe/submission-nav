@@ -57,6 +57,8 @@ def test_summarize_bucketed_groups_targets_and_avoids():
         ms_abstract="We analyzed patient omics data and trained machine learning classifiers.",
     )
     summary = summarize_bucketed(ranked, strategy="balanced", top_n=5)
+    assert summary["best_fit_ranked"][0]["journal"] == ranked[0].venue.name
+    assert summary["risk_adjusted_recommendations"] == summary["top"]
     assert summary["buckets"]["stretch"][0]["journal"] == "Trusted Biomedical Journal"
     assert summary["buckets"]["avoid"][0]["journal"] == "Systematic Reviews"
     assert summary["top"][0]["bucket"] == "stretch"
@@ -238,6 +240,25 @@ def test_citation_profile_adds_auditable_relatedness_signal():
     generic_row = next(item for item in ranked if item.venue.name == "Machine Learning")
     assert target_row.rationale["citation_relatedness"] > generic_row.rationale["citation_relatedness"]
     assert target_row.rationale["citation_bonus"] > 0
+
+
+def test_ambition_cap_is_advisory_not_core_rank_score():
+    elite = _v("The Lancet", ["clinical medicine", "patient outcomes"], 20.0)
+    specialty = _v("Safe Specialty Journal", ["clinical medicine", "patient outcomes"], 1.0)
+    contribution = {
+        "contribution_tier": "exploratory",
+        "avoid_bands": ["top_clinical", "elite_general", "high_impact_specialty"],
+        "recommended_bands": ["safe_specialty"],
+    }
+    ranked = rank_venues(
+        ["clinical medicine", "patient outcomes"],
+        [specialty, elite],
+        ms_title="Clinical outcomes in a patient cohort",
+        contribution_assessment=contribution,
+    )
+    elite_row = next(item for item in ranked if item.venue.name == "The Lancet")
+    assert elite_row.rationale["ambition_capped_score"] < elite_row.rationale["core_fit_score"]
+    assert elite_row.rationale["pre_domain_gate_score"] == elite_row.rationale["core_fit_score"]
 
 
 def test_bucketed_summary_keeps_domain_conflicts_out_of_target_buckets():

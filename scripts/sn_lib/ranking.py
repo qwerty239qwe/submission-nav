@@ -147,12 +147,14 @@ def rank_venues(
         )
         venue_band = classify_venue_ambition(v)
         ambition_delta, contribution_tier, ambition_reason = ambition_alignment(contribution_assessment, venue_band)
-        uncapped_score = ambition_cap(contribution_assessment, venue_band, suitability.strategy_score + ambition_delta)
+        ambition_adjusted_score = suitability.strategy_score + ambition_delta
+        ambition_capped_score = ambition_cap(contribution_assessment, venue_band, ambition_adjusted_score)
+        core_fit_score = suitability.strategy_score
         domain_gate = assess_domain_compatibility(ms_concepts, ms_title, ms_abstract, profile, v)
-        pre_citation_score = apply_domain_gate(uncapped_score, domain_gate)
+        pre_citation_score = apply_domain_gate(core_fit_score, domain_gate)
         citation = score_citation_relatedness(citation_profile, v)
         citation_score = float(citation.get("score") or 0.0)
-        citation_bonus = 0.10 * citation_score
+        citation_bonus = 0.12 * citation_score
         if domain_gate.label in {"conflict", "method_only_match"} and citation_score < 0.18:
             citation_bonus = 0.0
         score = min(1.0, pre_citation_score + citation_bonus)
@@ -173,7 +175,10 @@ def rank_venues(
             "raw_score": round(raw_score, 4),
             "suitability_score": suitability_payload["score"],
             "strategy_score": suitability_payload["strategy_score"],
-            "pre_domain_gate_score": round(uncapped_score, 4),
+            "core_fit_score": round(core_fit_score, 4),
+            "ambition_adjusted_score": round(ambition_adjusted_score, 4),
+            "ambition_capped_score": round(ambition_capped_score, 4),
+            "pre_domain_gate_score": round(core_fit_score, 4),
             "pre_citation_score": round(pre_citation_score, 4),
             "citation_relatedness": round(citation_score, 4),
             "citation_bonus": round(citation_bonus, 4),
@@ -292,6 +297,8 @@ def summarize_bucketed(
     return {
         "strategy": strategy,
         "bucket_order": bucket_order,
+        "best_fit_ranked": summarize_ranked(ranked, top_n=top_n, concept_limit=concept_limit),
+        "risk_adjusted_recommendations": ordered_top,
         "top": ordered_top,
         "buckets": buckets,
         "counts": counts,

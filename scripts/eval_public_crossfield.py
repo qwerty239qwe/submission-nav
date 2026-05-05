@@ -94,6 +94,20 @@ def _source_openalex_id(work: dict) -> str | None:
     return source_id.rstrip("/").split("/")[-1]
 
 
+def _normalize_name(name: str | None) -> str:
+    return " ".join((name or "").casefold().replace("&", "and").split())
+
+
+def _rank_of_name(rows: list[dict], target: str | None) -> int | None:
+    target_norm = _normalize_name(target)
+    if not target_norm:
+        return None
+    for idx, row in enumerate(rows, start=1):
+        if _normalize_name(row.get("journal")) == target_norm:
+            return idx
+    return None
+
+
 def enrich_source_impacts(works: list[dict]) -> None:
     cache: dict[str, dict] = {}
     for work in works:
@@ -257,15 +271,37 @@ def run_skill(repo: Path, manuscript: Path, run_dir: Path) -> tuple[int, float, 
 
 def summarize_run(run_dir: Path, work: dict, field: str, tier: str, elapsed: float, returncode: int, stderr: str) -> dict:
     ranked_path = run_dir / "ranked_agent_balanced.json"
+    raw_ranked_path = run_dir / "ranked_balanced.json"
     contribution_path = run_dir / "contribution_assessment.json"
     ranked = json.loads(ranked_path.read_text(encoding="utf-8")) if ranked_path.exists() else {}
+    raw_ranked = json.loads(raw_ranked_path.read_text(encoding="utf-8")) if raw_ranked_path.exists() else []
     contribution = json.loads(contribution_path.read_text(encoding="utf-8")) if contribution_path.exists() else {}
     source = _source(work)
     published = source.get("display_name")
-    top = ranked.get("top") or []
-    top_names = [row.get("journal") for row in top[:10]]
-    top5_quality = summarize_rank_quality(top, top_n=5)
-    top10_quality = summarize_rank_quality(top, top_n=10)
+    best_fit = ranked.get("best_fit_ranked") or []
+    if not best_fit and raw_ranked:
+        from sn_lib.venues import VenueHit
+        from sn_lib.ranking import Ranked
+
+        best_fit = [
+            Ranked(VenueHit(**row["venue"]), row["score"], row.get("rationale") or {}).to_summary_dict()
+            for row in raw_ranked[:15]
+        ]
+    bucketed_top = ranked.get("risk_adjusted_recommendations") or ranked.get("top") or []
+    top_names = [row.get("journal") for row in best_fit[:10]]
+    bucketed_names = [row.get("journal") for row in bucketed_top[:10]]
+    best_fit_rank = _rank_of_name(best_fit, published)
+    bucketed_rank = _rank_of_name(bucketed_top, published)
+    full_rank = None
+    if raw_ranked:
+        full_rows = [{"journal": row.get("venue", {}).get("name")} for row in raw_ranked]
+        full_rank = _rank_of_name(full_rows, published)
+    demotion_reason = None
+    if best_fit_rank is not None and bucketed_rank is None:
+        matched = next((row for row in best_fit if _normalize_name(row.get("journal")) == _normalize_name(published)), {})
+        demotion_reason = matched.get("bucket_reason") or matched.get("ambition_reason")
+    top5_quality = summarize_rank_quality(best_fit, top_n=5)
+    top10_quality = summarize_rank_quality(best_fit, top_n=10)
     return {
         "field": field,
         "tier_proxy": tier,
@@ -274,8 +310,14 @@ def summarize_run(run_dir: Path, work: dict, field: str, tier: str, elapsed: flo
         "publication_date": work.get("publication_date"),
         "published_venue": published,
         "published_venue_impact_proxy": _impact(work),
-        "published_venue_in_top10": published in top_names,
+        "published_venue_in_top10": best_fit_rank is not None and best_fit_rank <= 10,
+        "published_best_fit_rank": best_fit_rank,
+        "published_full_rank": full_rank,
+        "published_bucketed_rank": bucketed_rank,
+        "published_bucketed_in_top10": published in bucketed_names,
+        "published_demotion_reason": demotion_reason,
         "top_recommendations": top_names,
+        "bucketed_recommendations": bucketed_names,
         "top5_quality": top5_quality,
         "top10_quality": top10_quality,
         "contribution_tier": contribution.get("contribution_tier"),

@@ -129,4 +129,6 @@ def test_cli_strategist_runs_chained_workflow(tmp_path, tmp_config_dir, monkeypa
     assert "J Widget" in out
     payload = json.loads(out[out.index("{"):])
     assert "buckets" in payload
+    assert "best_fit_ranked" in payload
+    assert "risk_adjusted_recommendations" in payload
     assert payload["top"][0]["journal"] == "J Widget"
