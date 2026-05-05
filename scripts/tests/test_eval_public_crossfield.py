@@ -5,7 +5,7 @@ import respx
 
 import json
 
-from eval_public_crossfield import default_from_date, default_to_date, fetch_candidates, _matches_field, summarize_run
+from eval_public_crossfield import default_from_date, default_to_date, fetch_candidates, _matches_field, summarize_results, summarize_run
 
 
 def test_default_from_date_uses_five_year_window():
@@ -114,6 +114,33 @@ def test_summarize_run_reports_best_fit_and_bucketed_ranks(tmp_path):
     result = summarize_run(run_dir, work, "chemistry", "middle", 1.23, 0, "")
     assert result["published_venue_in_top10"] is True
     assert result["published_best_fit_rank"] == 1
+    assert result["published_candidate_present"] is False
     assert result["published_bucketed_rank"] is None
     assert result["top_recommendations"] == ["Expected Journal", "Other Journal"]
     assert result["bucketed_recommendations"] == ["Other Journal"]
+
+
+def test_summarize_results_reports_separate_primary_metrics():
+    summary = summarize_results([
+        {
+            "returncode": 0,
+            "published_best_fit_rank": 3,
+            "published_bucketed_rank": None,
+            "published_full_rank": 3,
+            "published_candidate_present": True,
+            "top5_quality": {"rates": {"scope_caution": 0.2}, "has_contamination": True},
+        },
+        {
+            "returncode": 0,
+            "published_best_fit_rank": None,
+            "published_bucketed_rank": 8,
+            "published_full_rank": 18,
+            "published_candidate_present": True,
+            "top5_quality": {"rates": {"scope_caution": 0.0}, "has_contamination": False},
+        },
+    ])
+    assert summary["best_fit_top10"] == 0.5
+    assert summary["bucketed_top10"] == 0.5
+    assert summary["candidate_present"] == 1.0
+    assert summary["full_rank_top20"] == 1.0
+    assert summary["top5_contaminated_case_rate"] == 0.5

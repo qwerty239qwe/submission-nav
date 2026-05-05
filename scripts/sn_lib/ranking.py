@@ -223,6 +223,20 @@ def summarize_ranked(
     return [r.to_summary_dict(concept_limit=concept_limit) for r in items]
 
 
+def _high_confidence_fit(item: Ranked) -> bool:
+    rationale = item.rationale
+    if rationale.get("domain_gate") in {"conflict", "method_only_match"}:
+        return False
+    if (rationale.get("article_type_fit") or 0.0) < 0.7:
+        return False
+    return (
+        item.score >= 0.52
+        or (rationale.get("fit") or 0.0) >= 0.55
+        or (rationale.get("scope_fit") or 0.0) >= 0.55
+        or (rationale.get("citation_relatedness") or 0.0) >= 0.28
+    )
+
+
 def _bucket_for(item: Ranked) -> tuple[str, str]:
     rationale = item.rationale
     risk = rationale.get("risk_label")
@@ -247,9 +261,12 @@ def _bucket_for(item: Ranked) -> tuple[str, str]:
         return "fallback", "adjacent-domain low-confidence venue"
     if venue_band == "broad_megajournal":
         return "fallback", "broad fallback venue"
+    ambition_caution = "exceeds contribution assessment" in ambition_reason or "probably too ambitious" in ambition_reason
+    if ambition_caution and _high_confidence_fit(item):
+        return "stretch", "ambitious but high-confidence topical fit"
     if "exceeds contribution assessment" in ambition_reason and venue_band in {"elite_general", "top_clinical"}:
-        return "avoid", "ambition mismatch"
-    if "exceeds contribution assessment" in ambition_reason or "probably too ambitious" in ambition_reason:
+        return "fallback", "ambition mismatch; keep only as stretch discussion"
+    if ambition_caution:
         return "fallback", "ambition caution"
     if item.score >= 0.43 and impact >= 0.30:
         return "stretch", "higher-impact plausible venue"

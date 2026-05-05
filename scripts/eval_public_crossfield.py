@@ -313,6 +313,7 @@ def summarize_run(run_dir: Path, work: dict, field: str, tier: str, elapsed: flo
         "published_venue_in_top10": best_fit_rank is not None and best_fit_rank <= 10,
         "published_best_fit_rank": best_fit_rank,
         "published_full_rank": full_rank,
+        "published_candidate_present": full_rank is not None,
         "published_bucketed_rank": bucketed_rank,
         "published_bucketed_in_top10": published in bucketed_names,
         "published_demotion_reason": demotion_reason,
@@ -328,6 +329,43 @@ def summarize_run(run_dir: Path, work: dict, field: str, tier: str, elapsed: flo
         "artifact_chars": sum(path.stat().st_size for path in run_dir.glob("*.json") if path.is_file()),
         "returncode": returncode,
         "stderr": stderr[-1000:],
+    }
+
+
+def summarize_results(results: list[dict]) -> dict:
+    ok = [row for row in results if row.get("returncode") == 0]
+    total = len(ok)
+    if not total:
+        return {
+            "cases": len(results),
+            "successful_cases": 0,
+            "best_fit_top10": 0.0,
+            "bucketed_top10": 0.0,
+            "candidate_present": 0.0,
+        }
+
+    def rate(predicate) -> float:
+        return round(sum(1 for row in ok if predicate(row)) / total, 3)
+
+    ranks = [row["published_full_rank"] for row in ok if row.get("published_full_rank") is not None]
+    top5_quality_rows = [row.get("top5_quality") or {} for row in ok]
+    return {
+        "cases": len(results),
+        "successful_cases": total,
+        "best_fit_top10": rate(lambda row: row.get("published_best_fit_rank") is not None and row["published_best_fit_rank"] <= 10),
+        "bucketed_top10": rate(lambda row: row.get("published_bucketed_rank") is not None and row["published_bucketed_rank"] <= 10),
+        "candidate_present": rate(lambda row: row.get("published_candidate_present")),
+        "full_rank_top10": rate(lambda row: row.get("published_full_rank") is not None and row["published_full_rank"] <= 10),
+        "full_rank_top20": rate(lambda row: row.get("published_full_rank") is not None and row["published_full_rank"] <= 20),
+        "median_full_rank": sorted(ranks)[len(ranks) // 2] if ranks else None,
+        "top5_scope_caution_rate": round(
+            sum(row.get("rates", {}).get("scope_caution", 0.0) for row in top5_quality_rows) / total,
+            3,
+        ),
+        "top5_contaminated_case_rate": round(
+            sum(bool(row.get("has_contamination")) for row in top5_quality_rows) / total,
+            3,
+        ),
     }
 
 
@@ -350,6 +388,7 @@ def main() -> int:
 
     def flush_outputs() -> None:
         (out_dir / "results.json").write_text(json.dumps(results, indent=2, ensure_ascii=False), encoding="utf-8")
+        (out_dir / "summary.json").write_text(json.dumps(summarize_results(results), indent=2, ensure_ascii=False), encoding="utf-8")
         (out_dir / "manifest.json").write_text(json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8")
 
     for field in args.fields:

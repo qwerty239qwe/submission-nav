@@ -261,6 +261,26 @@ def test_ambition_cap_is_advisory_not_core_rank_score():
     assert elite_row.rationale["pre_domain_gate_score"] == elite_row.rationale["core_fit_score"]
 
 
+def test_bucketed_keeps_high_confidence_ambitious_matches_visible():
+    elite = _v("The Lancet Neurology", ["clinical neurology", "stroke", "patient outcomes"], 10.0)
+    fallback = _v("Safe Neurology Journal", ["clinical neurology", "stroke"], 1.0)
+    contribution = {
+        "contribution_tier": "exploratory",
+        "avoid_bands": ["top_clinical", "elite_general", "high_impact_specialty"],
+        "recommended_bands": ["safe_specialty"],
+    }
+    ranked = rank_venues(
+        ["clinical neurology", "stroke", "patient outcomes"],
+        [elite, fallback],
+        ms_title="Stroke burden and patient outcomes",
+        contribution_assessment=contribution,
+    )
+    summary = summarize_bucketed(ranked, strategy="balanced", top_n=5)
+    rows = [row for rows in summary["buckets"].values() for row in rows if row["journal"] == "The Lancet Neurology"]
+    assert rows[0]["bucket"] == "stretch"
+    assert "ambitious" in rows[0]["bucket_reason"]
+
+
 def test_bucketed_summary_keeps_domain_conflicts_out_of_target_buckets():
     conflict = _v("Journal of Health Psychology", ["psychology", "social science"], 10.0)
     target = _v("ACS Catalysis", ["chemistry", "catalysis"], 3.0)
