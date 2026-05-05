@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 from collections import Counter
 from dataclasses import asdict, dataclass
+from urllib.parse import quote
 
 import httpx
 from rapidfuzz import fuzz
@@ -13,6 +14,9 @@ from .venues import OPENALEX_WORKS, VenueHit
 
 
 OPENALEX_WORK_ID_RE = re.compile(r"(?:https?://openalex\.org/)?(W\d+)", re.I)
+DOI_RE = re.compile(r"(?:https?://(?:dx\.)?doi\.org/)?(10\.\d{4,9}/[^\s;,]+)", re.I)
+LEADING_REF_MARKER_RE = re.compile(r"^\s*(?:\[\d+\]|\d+\.|\d+\))\s*")
+YEAR_RE = re.compile(r"\b(?:19|20)\d{2}[a-z]?\b")
 SOURCE_WEIGHT = 0.45
 TOPIC_WEIGHT = 0.40
 FIELD_WEIGHT = 0.15
@@ -61,6 +65,21 @@ def extract_openalex_work_ids(references: list[str], max_refs: int = 30) -> list
     return out
 
 
+def extract_dois(references: list[str], max_refs: int = 30) -> list[str]:
+    out: list[str] = []
+    seen: set[str] = set()
+    for ref in references:
+        for match in DOI_RE.findall(ref or ""):
+            doi = match.rstrip(".").lower()
+            if doi in seen:
+                continue
+            seen.add(doi)
+            out.append(doi)
+            if len(out) >= max_refs:
+                return out
+    return out
+
+
 def _cache() -> HttpCache:
     cfg = Config.load()
     return HttpCache(cfg.cache_dir / "http.db")
@@ -84,6 +103,95 @@ def _get_openalex_work(work_id: str) -> dict | None:
     data = response.json()
     cache.set(url, params, data)
     return data
+
+
+def _get_openalex_work_by_doi(doi: str) -> dict | None:
+    encoded = quote(f"https://doi.org/{doi}", safe="")
+    url = f"{OPENALEX_WORKS}/{encoded}"
+    params: dict[str, str] = {}
+    mailto = Config.load().key("openalex_email")
+    if mailto:
+        params["mailto"] = mailto
+    cache = _cache()
+    cached = cache.get(url, params)
+    if cached is not None:
+        return cached
+    try:
+        response = httpx.get(url, params=params, timeout=20)
+        response.raise_for_status()
+    except httpx.HTTPError:
+        return None
+    data = response.json()
+    cache.set(url, params, data)
+    return data
+
+
+def _search_openalex_work_by_title(title: str) -> dict | None:
+    params: dict[str, str | int] = {"search": title, "per-page": 1}
+    mailto = Config.load().key("openalex_email")
+    if mailto:
+        params["mailto"] = mailto
+    cache = _cache()
+    cached = cache.get(OPENALEX_WORKS, params)
+    if cached is not None:
+        data = cached
+    else:
+        try:
+            response = httpx.get(OPENALEX_WORKS, params=params, timeout=20)
+            response.raise_for_status()
+        except httpx.HTTPError:
+            return None
+        data = response.json()
+        cache.set(OPENALEX_WORKS, params, data)
+    candidates = data.get("results") or []
+    if not candidates:
+        return None
+    candidate = candidates[0]
+    candidate_title = candidate.get("display_name") or candidate.get("title") or ""
+    if fuzz.token_set_ratio(title, candidate_title) < 90:
+        return None
+    return candidate
+
+
+def _reference_title_candidate(reference: str) -> str | None:
+    ref = LEADING_REF_MARKER_RE.sub("", reference or "")
+    ref = re.sub(r"https?://\S+", " ", ref)
+    ref = DOI_RE.sub(" ", ref)
+    ref = re.sub(r"\s+", " ", ref).strip(" .")
+    if not ref:
+        return None
+
+    segments = [segment.strip(" .") for segment in ref.split(".") if segment.strip(" .")]
+    for segment in segments:
+        words = segment.split()
+        if len(words) < 5 or len(words) > 32:
+            continue
+        if YEAR_RE.search(segment):
+            continue
+        if sum(1 for word in words if "," in word) >= 2:
+            continue
+        return segment
+    words = ref.split()
+    if 6 <= len(words) <= 28:
+        return ref
+    return None
+
+
+def _resolve_reference(reference: str) -> dict | None:
+    id_match = OPENALEX_WORK_ID_RE.search(reference or "")
+    if id_match:
+        work = _get_openalex_work(id_match.group(1).upper())
+        if work:
+            return work
+    doi_match = DOI_RE.search(reference or "")
+    if doi_match:
+        work = _get_openalex_work_by_doi(doi_match.group(1).rstrip(".").lower())
+        if work:
+            return work
+    title = _reference_title_candidate(reference)
+    if title:
+        return _search_openalex_work_by_title(title)
+    return None
 
 
 def _nested_get(data: dict, *path: str):
@@ -164,15 +272,21 @@ def build_citation_profile(reference_works: list[dict], unresolved_refs: int = 0
 
 
 def build_citation_profile_from_references(references: list[str], max_refs: int = 30) -> CitationProfile | None:
-    work_ids = extract_openalex_work_ids(references, max_refs=max_refs)
-    if not work_ids:
+    candidates = [ref for ref in references if (ref or "").strip()][:max_refs]
+    if not candidates:
         return None
     works = []
-    for work_id in work_ids:
-        work = _get_openalex_work(work_id)
+    seen_work_ids: set[str] = set()
+    for reference in candidates:
+        work = _resolve_reference(reference)
         if work:
+            work_id = (work.get("id") or "").casefold()
+            if work_id and work_id in seen_work_ids:
+                continue
+            if work_id:
+                seen_work_ids.add(work_id)
             works.append(work)
-    return build_citation_profile(works, unresolved_refs=max(0, len(work_ids) - len(works)))
+    return build_citation_profile(works, unresolved_refs=max(0, len(candidates) - len(works)))
 
 
 def _best_weighted_fuzzy(needles: dict[str, float], haystack: list[str], threshold: int = 82) -> float:
