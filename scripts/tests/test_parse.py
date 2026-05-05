@@ -58,6 +58,8 @@ def test_parse_docx_handles_numbered_headings_and_numbered_references(tmp_path):
     assert any("Materials and Methods" in s.heading for s in m.sections)
     assert any("Results" in s.heading for s in m.sections)
     assert m.reference_count == 2
+    assert len(m.references) == 2
+    assert "10.1000/foo" in m.references[0]
 
 
 def test_parse_summary_dict_is_compact(tmp_path):

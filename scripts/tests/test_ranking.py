@@ -217,6 +217,29 @@ def test_domain_gate_prevents_generic_method_journal_from_beating_application_jo
     assert ranked[1].score <= 0.45
 
 
+def test_citation_profile_adds_auditable_relatedness_signal():
+    target = _v("Journal of Biomedical Informatics", ["clinical prediction", "biomedical informatics"], 3.0)
+    generic = _v("Machine Learning", ["artificial intelligence", "algorithms"], 8.0)
+    profile = {
+        "source_counts": {"journal of biomedical informatics": 3.0},
+        "topic_counts": {"clinical prediction models": 3.0, "biomedical informatics": 2.0},
+        "field_counts": {"medicine": 3.0},
+        "resolved_refs": 8,
+        "unresolved_refs": 0,
+    }
+    ranked = rank_venues(
+        ["machine learning", "clinical prediction"],
+        [generic, target],
+        ms_title="Machine learning prediction from clinical records",
+        ms_abstract="We trained and validated models in a patient cohort.",
+        citation_profile=profile,
+    )
+    target_row = next(item for item in ranked if item.venue.name == "Journal of Biomedical Informatics")
+    generic_row = next(item for item in ranked if item.venue.name == "Machine Learning")
+    assert target_row.rationale["citation_relatedness"] > generic_row.rationale["citation_relatedness"]
+    assert target_row.rationale["citation_bonus"] > 0
+
+
 def test_bucketed_summary_keeps_domain_conflicts_out_of_target_buckets():
     conflict = _v("Journal of Health Psychology", ["psychology", "social science"], 10.0)
     target = _v("ACS Catalysis", ["chemistry", "catalysis"], 3.0)

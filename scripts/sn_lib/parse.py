@@ -1,6 +1,6 @@
 from __future__ import annotations
 import re
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, field
 from pathlib import Path
 from .cli import emit_json
 
@@ -18,6 +18,7 @@ class Manuscript:
     word_count: int
     reference_count: int
     source_path: str
+    references: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         return {**asdict(self), "sections": [asdict(s) for s in self.sections]}
@@ -37,6 +38,8 @@ class Manuscript:
 HEADING_NUMBER_RE = re.compile(r"^\s*\d+(?:\.\d+)*\.?\s*")
 REF_LINE_RE = re.compile(r"(?m)^\s*(?:\[\d+\]|\d+\.)\s+")
 REF_BRACKET_RE = re.compile(r"\[\d+\]")
+OPENALEX_WORK_RE = re.compile(r"(?:https?://openalex\.org/)?W\d+", re.I)
+DOI_RE = re.compile(r"\b10\.\d{4,9}/[^\s;,]+", re.I)
 GENERIC_PDF_LABELS = {
     "research article",
     "article",
@@ -119,6 +122,30 @@ def _count_references(text: str) -> int:
     if numbered:
         return len(numbered)
     return len(re.findall(r"\b10\.\d{4,9}/\S+\b", text))
+
+
+def _extract_references(text: str | None) -> list[str]:
+    if not text:
+        return []
+    out: list[str] = []
+    current: list[str] = []
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        if REF_LINE_RE.match(line) and current:
+            out.append(" ".join(current).strip())
+            current = [line]
+        else:
+            current.append(line)
+    if current:
+        out.append(" ".join(current).strip())
+
+    if len(out) <= 1:
+        found = OPENALEX_WORK_RE.findall(text) or DOI_RE.findall(text)
+        if found:
+            return [ref.strip().rstrip(".") for ref in found]
+    return [ref for ref in out if ref]
 
 
 def _clean_abstract_text(text: str | None) -> str | None:
@@ -290,9 +317,10 @@ def _parse_docx(path: Path) -> Manuscript:
     abstract = _clean_abstract_text(abstract)
     refs_section = next((s for s in sections if _is_reference_heading(s.heading)), None)
     ref_count = _count_references(refs_section.text) if refs_section else 0
+    references = _extract_references(refs_section.text if refs_section else None)
     all_text = " ".join(s.text for s in sections)
     wc = len(all_text.split())
-    return Manuscript(title.strip(), authors, abstract, sections, wc, ref_count, str(path))
+    return Manuscript(title.strip(), authors, abstract, sections, wc, ref_count, str(path), references=references)
 
 def _parse_pdf(path: Path) -> Manuscript:
     import fitz
@@ -339,8 +367,9 @@ def _parse_pdf(path: Path) -> Manuscript:
     abstract = _clean_abstract_text(abstract)
     refs_section = next((s for s in sections if _is_reference_heading(s.heading)), None)
     ref_count = _count_references(refs_section.text) if refs_section else 0
+    references = _extract_references(refs_section.text if refs_section else None)
     wc = len(full.split())
-    return Manuscript(title.strip(), authors, abstract, sections, wc, ref_count, str(path))
+    return Manuscript(title.strip(), authors, abstract, sections, wc, ref_count, str(path), references=references)
 
 def parse_manuscript(path: str | Path) -> Manuscript:
     p = Path(path)
