@@ -73,7 +73,7 @@ def test_summarize_bucketed_keeps_broad_megajournal_as_safe_fallback():
     )
     summary = summarize_bucketed(ranked, strategy="balanced", top_n=5)
     broad_rows = [row for rows in summary["buckets"].values() for row in rows if row["journal"] == "Scientific Reports"]
-    assert broad_rows[0]["bucket"] in {"safe", "fallback"}
+    assert broad_rows[0]["bucket"] == "fallback"
 
 
 def test_broad_journal_prestige_does_not_beat_scope_by_default():

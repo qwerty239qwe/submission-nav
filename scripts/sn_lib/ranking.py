@@ -227,9 +227,7 @@ def _bucket_for(item: Ranked) -> tuple[str, str]:
     if domain_gate == "adjacent" and item.score < 0.50:
         return "fallback", "adjacent-domain low-confidence venue"
     if venue_band == "broad_megajournal":
-        if item.score >= 0.45:
-            return "safe", "broad fallback venue"
-        return "fallback", "broad low-confidence venue"
+        return "fallback", "broad fallback venue"
     if "exceeds contribution assessment" in ambition_reason and venue_band in {"elite_general", "top_clinical"}:
         return "avoid", "ambition mismatch"
     if "exceeds contribution assessment" in ambition_reason or "probably too ambitious" in ambition_reason:
