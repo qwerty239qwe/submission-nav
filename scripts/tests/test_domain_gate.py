@@ -91,3 +91,22 @@ def test_domain_gate_does_not_treat_molecular_biology_as_chemistry_venue():
 
     assert gate.label in {"adjacent", "conflict"}
     assert "chemistry" not in gate.venue_domains
+
+
+def test_domain_gate_treats_physics_venue_as_chemistry_adjacent_without_primary_signal():
+    concepts = ["computational chemistry", "molecular simulation", "catalysis"]
+    profile = infer_manuscript_profile(
+        concepts,
+        title="Computational chemistry for catalytic molecules",
+        abstract="We model molecular catalysts with quantum simulations.",
+    )
+    gate = assess_domain_compatibility(
+        concepts,
+        "Computational chemistry for catalytic molecules",
+        "We model molecular catalysts with quantum simulations.",
+        profile,
+        _venue("Physical Review Letters", ["condensed matter physics", "physical chemistry"]),
+    )
+
+    assert gate.label == "adjacent"
+    assert gate.score_cap == 0.58

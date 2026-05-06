@@ -103,6 +103,28 @@ def _apc_penalty(apc: float | None, budget: float | None) -> float:
         return 0.0
     return min(0.5, (apc - budget) / max(budget, 1.0) * 0.25)
 
+
+def _ambition_cap_escape(
+    ambition_reason: str,
+    venue_band: str,
+    fit: float,
+    scope_fit: float,
+    article_type_fit: float,
+    domain_label: str,
+    citation_score: float,
+) -> bool:
+    if venue_band in {"fallback", "safe_specialty", "broad_megajournal"}:
+        return True
+    if venue_band == "specialty_target" and fit >= 0.45 and citation_score >= 0.18:
+        return True
+    if "exceeds contribution assessment" not in ambition_reason and "probably too ambitious" not in ambition_reason:
+        return True
+    if domain_label in {"conflict", "method_only_match"}:
+        return False
+    if article_type_fit < 0.45:
+        return False
+    return max(fit, scope_fit) >= 0.55 and citation_score >= 0.25
+
 def rank_venues(
     ms_concepts: list[str],
     venues: list[VenueHit],
@@ -151,15 +173,25 @@ def rank_venues(
         ambition_capped_score = ambition_cap(contribution_assessment, venue_band, ambition_adjusted_score)
         core_fit_score = suitability.strategy_score
         domain_gate = assess_domain_compatibility(ms_concepts, ms_title, ms_abstract, profile, v)
-        pre_citation_score = apply_domain_gate(core_fit_score, domain_gate)
         citation = score_citation_relatedness(citation_profile, v)
         citation_score = float(citation.get("score") or 0.0)
+        domain_gate_payload = domain_gate.to_dict()
+        suitability_payload = suitability.to_dict()
+        cap_escaped = _ambition_cap_escape(
+            ambition_reason,
+            venue_band,
+            fit,
+            suitability_payload["scope_fit"],
+            suitability_payload["article_type_fit"],
+            domain_gate_payload["label"],
+            citation_score,
+        )
+        ranking_input_score = core_fit_score if cap_escaped else ambition_capped_score
+        pre_citation_score = apply_domain_gate(ranking_input_score, domain_gate)
         citation_bonus = 0.12 * citation_score
         if domain_gate.label in {"conflict", "method_only_match"} and citation_score < 0.18:
             citation_bonus = 0.0
         score = min(1.0, pre_citation_score + citation_bonus)
-        suitability_payload = suitability.to_dict()
-        domain_gate_payload = domain_gate.to_dict()
         out.append(Ranked(v, round(score, 4), {
             "strategy": strategy,
             "fit": round(fit, 3),
@@ -178,7 +210,8 @@ def rank_venues(
             "core_fit_score": round(core_fit_score, 4),
             "ambition_adjusted_score": round(ambition_adjusted_score, 4),
             "ambition_capped_score": round(ambition_capped_score, 4),
-            "pre_domain_gate_score": round(core_fit_score, 4),
+            "ambition_cap_escaped": cap_escaped,
+            "pre_domain_gate_score": round(ranking_input_score, 4),
             "pre_citation_score": round(pre_citation_score, 4),
             "citation_relatedness": round(citation_score, 4),
             "citation_bonus": round(citation_bonus, 4),

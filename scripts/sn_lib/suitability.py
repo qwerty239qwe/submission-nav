@@ -196,6 +196,21 @@ def _venue_kind(venue: VenueHit) -> set[str]:
     kinds: set[str] = set()
     if re.search(r"\b(nature reviews|annual reviews?|annual review|systematic reviews?|reviews? in|journal of reviews?|review of|trends in|current opinion|critical reviews?|review journals?)\b", name):
         kinds.add("review")
+    chemistry_review_names = {
+        "chemical reviews",
+        "chemical society reviews",
+        "accounts of chemical research",
+    }
+    physics_review_exclusions = (
+        "physical review",
+        "physical review letters",
+        "modern physics",
+        "review letters",
+    )
+    if name in chemistry_review_names:
+        kinds.add("review")
+    elif name.endswith(" reviews") and not name.startswith(physics_review_exclusions):
+        kinds.add("review")
     if re.search(r"\b(methods?|protocols?|methodology)\b", name):
         kinds.add("methods")
     if re.search(r"\b(scientific data|data in brief|database|data)\b", name):

@@ -153,6 +153,27 @@ def infer_venue_domains(venue: VenueHit) -> set[str]:
     return domains
 
 
+def _has_chemistry_primary_signal(venue: VenueHit) -> bool:
+    name = _norm(venue.name)
+    core_concepts = _norm(" ".join((venue.concepts or [])[:3]))
+    physics_first_names = (
+        "physical review",
+        "journal of physics",
+        "computer physics",
+        "machine learning science",
+    )
+    if name.startswith(physics_first_names) and not any(term in name for term in ("chemical physics", "physical chemistry")):
+        return False
+    chemistry_terms = (
+        "chemistry", "chemical", "chimica", "catalysis", "synthesis", "organic",
+        "inorganic", "molecule", "cheminformatics", "acs ",
+        "jacs",
+    )
+    if any(term in name for term in (*chemistry_terms, "molecular informatics")):
+        return True
+    return any(term in core_concepts for term in chemistry_terms)
+
+
 def assess_domain_compatibility(
     concepts: list[str],
     title: str | None,
@@ -171,6 +192,19 @@ def assess_domain_compatibility(
             tuple(sorted(venue_domains)),
             tuple(sorted(method_domains)),
             ("insufficient domain evidence for manuscript or venue",),
+        )
+    if (
+        "chemistry" in manuscript_domains
+        and manuscript_domains & venue_domains
+        and not _has_chemistry_primary_signal(venue)
+        and venue_domains & {"physics", "materials", "computer_science", "data_science", "biomedical"}
+    ):
+        return DomainGate(
+            "adjacent", 0.58, 0.02,
+            tuple(sorted(manuscript_domains)),
+            tuple(sorted(venue_domains)),
+            tuple(sorted(method_domains)),
+            ("venue shares broad chemistry-adjacent signals but lacks primary chemistry scope evidence",),
         )
     if manuscript_domains & venue_domains:
         return DomainGate(

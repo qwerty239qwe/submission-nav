@@ -242,7 +242,7 @@ def test_citation_profile_adds_auditable_relatedness_signal():
     assert target_row.rationale["citation_bonus"] > 0
 
 
-def test_ambition_cap_is_advisory_not_core_rank_score():
+def test_low_evidence_ambition_cap_affects_core_rank_score():
     elite = _v("The Lancet", ["clinical medicine", "patient outcomes"], 20.0)
     specialty = _v("Safe Specialty Journal", ["clinical medicine", "patient outcomes"], 1.0)
     contribution = {
@@ -258,7 +258,77 @@ def test_ambition_cap_is_advisory_not_core_rank_score():
     )
     elite_row = next(item for item in ranked if item.venue.name == "The Lancet")
     assert elite_row.rationale["ambition_capped_score"] < elite_row.rationale["core_fit_score"]
+    assert elite_row.rationale["ambition_cap_escaped"] is False
+    assert elite_row.rationale["pre_domain_gate_score"] == elite_row.rationale["ambition_capped_score"]
+
+
+def test_high_citation_ambitious_match_can_escape_cap():
+    elite = _v("Nature Communications", ["chemistry", "catalysis", "molecular synthesis"], 5.0)
+    target = _v("Chemistry Target", ["chemistry", "catalysis"], 2.0)
+    contribution = {
+        "contribution_tier": "exploratory",
+        "avoid_bands": ["high_impact_specialty"],
+        "recommended_bands": ["safe_specialty"],
+    }
+    ranked = rank_venues(
+        ["chemistry", "catalysis", "molecular synthesis"],
+        [target, elite],
+        ms_title="Catalytic synthesis of organic molecules",
+        ms_abstract="We report chemical synthesis and catalysis.",
+        contribution_assessment=contribution,
+        citation_profile={
+            "source_counts": {},
+            "topic_counts": {"chemistry": 3, "catalysis": 3, "molecular synthesis": 3},
+            "field_counts": {"chemistry": 3},
+            "resolved_refs": 10,
+            "unresolved_refs": 0,
+        },
+    )
+    elite_row = next(item for item in ranked if item.venue.name == "Nature Communications")
+    assert elite_row.rationale["ambition_cap_escaped"] is True
     assert elite_row.rationale["pre_domain_gate_score"] == elite_row.rationale["core_fit_score"]
+
+
+def test_specialty_target_not_suppressed_by_abstract_only_ambition_caution():
+    target = _v("Advances in Materials Science and Engineering", ["materials science", "chemistry"], 0.5)
+    target.specialty_confidence = 0.70
+    elite = _v("Advanced Materials", ["materials science", "chemistry"], 8.0)
+    contribution = {
+        "contribution_tier": "exploratory",
+        "avoid_bands": ["high_impact_specialty", "top_clinical", "elite_general"],
+        "recommended_bands": ["safe_specialty", "broad_megajournal"],
+    }
+    ranked = rank_venues(
+        ["materials science", "chemistry"],
+        [target, elite],
+        ms_title="Nanomaterials synthesis and engineering",
+        contribution_assessment=contribution,
+        citation_profile={
+            "source_counts": {},
+            "topic_counts": {"materials science": 3, "chemistry": 3},
+            "field_counts": {"chemistry": 2},
+            "resolved_refs": 8,
+            "unresolved_refs": 0,
+        },
+    )
+    target_row = next(item for item in ranked if item.venue.name == "Advances in Materials Science and Engineering")
+    assert target_row.rationale["venue_ambition_band"] == "specialty_target"
+    assert target_row.rationale["ambition_cap_escaped"] is True
+    assert target_row.rationale["pre_domain_gate_score"] == target_row.rationale["core_fit_score"]
+
+
+def test_chemistry_review_venue_demoted_for_original_research():
+    review = _v("Chemical Society Reviews", ["chemistry", "catalysis"], 10.0)
+    target = _v("Helvetica Chimica Acta", ["chemistry", "organic synthesis"], 0.5)
+    ranked = rank_venues(
+        ["organic synthesis", "chemistry"],
+        [review, target],
+        ms_title="Catalytic synthesis of organic molecules",
+        ms_abstract="We report chemical synthesis and catalysis.",
+    )
+    review_row = next(item for item in ranked if item.venue.name == "Chemical Society Reviews")
+    assert review_row.rationale["article_type_fit"] <= 0.1
+    assert review_row.rationale["risk_label"] == "high"
 
 
 def test_bucketed_keeps_high_confidence_ambitious_matches_visible():
