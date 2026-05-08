@@ -11,6 +11,7 @@ import httpx
 from docx import Document
 
 from sn_lib.config import Config
+from sn_lib.eval_quality import summarize_rank_quality
 
 
 OPENALEX_WORKS = "https://api.openalex.org/works"
@@ -36,6 +37,17 @@ FIELD_REQUIRED = {
     "social_sciences": ("social", "education", "inequality", "psychology", "policy", "survey"),
     "chemistry": ("chemistry", "chemical", "catalysis", "synthesis", "molecule", "organic"),
     "physics": ("physics", "quantum", "optical", "condensed matter", "particle", "electron"),
+}
+
+
+FIELD_TOPIC_TERMS = {
+    "life_sciences_medicine": ("medicine", "clinical medicine", "health sciences", "biology", "genetics"),
+    "engineering": ("engineering", "materials science", "mechanical engineering", "electrical engineering"),
+    "computer_science": ("computer science", "artificial intelligence", "machine learning", "software"),
+    "environmental_sciences": ("environmental science", "earth sciences", "ecology", "climate"),
+    "social_sciences": ("social sciences", "psychology", "economics", "education", "political science"),
+    "chemistry": ("chemistry", "chemical", "materials chemistry", "organic chemistry"),
+    "physics": ("physics", "astronomy", "condensed matter", "optics", "quantum"),
 }
 
 
@@ -80,6 +92,20 @@ def _source_openalex_id(work: dict) -> str | None:
     if not source_id:
         return None
     return source_id.rstrip("/").split("/")[-1]
+
+
+def _normalize_name(name: str | None) -> str:
+    return " ".join((name or "").casefold().replace("&", "and").split())
+
+
+def _rank_of_name(rows: list[dict], target: str | None) -> int | None:
+    target_norm = _normalize_name(target)
+    if not target_norm:
+        return None
+    for idx, row in enumerate(rows, start=1):
+        if _normalize_name(row.get("journal")) == target_norm:
+            return idx
+    return None
 
 
 def enrich_source_impacts(works: list[dict]) -> None:
@@ -132,7 +158,10 @@ def fetch_candidates(
     openalex_mailto = Config.load().key("openalex_email")
     if openalex_mailto:
         params["mailto"] = openalex_mailto
-    response = httpx.get(OPENALEX_WORKS, params=params, timeout=30)
+    try:
+        response = httpx.get(OPENALEX_WORKS, params=params, timeout=30)
+    except httpx.HTTPError as exc:
+        raise RuntimeError(f"OpenAlex works fetch failed: {type(exc).__name__}: {exc}") from exc
     if response.status_code != 200:
         message = response.text[:500]
         try:
@@ -152,7 +181,37 @@ def _matches_field(work: dict, field: str) -> bool:
         work.get("title") or "",
         _abstract(work.get("abstract_inverted_index")),
     ]).casefold()
-    return any(term in haystack for term in FIELD_REQUIRED[field])
+    topic_text = _topic_text(work)
+    text_match = any(term in haystack for term in FIELD_REQUIRED[field])
+    topic_match = any(term in topic_text for term in FIELD_TOPIC_TERMS[field])
+    return topic_match or (text_match and not topic_text)
+
+
+def _topic_text(work: dict) -> str:
+    parts: list[str] = []
+    primary = work.get("primary_topic") or {}
+    for path in (
+        ("display_name",),
+        ("subfield", "display_name"),
+        ("field", "display_name"),
+        ("domain", "display_name"),
+    ):
+        cur = primary
+        for key in path:
+            if not isinstance(cur, dict):
+                cur = None
+                break
+            cur = cur.get(key)
+        if cur:
+            parts.append(str(cur))
+    for topic in work.get("topics") or []:
+        if topic.get("display_name"):
+            parts.append(topic["display_name"])
+        for key in ("subfield", "field", "domain"):
+            node = topic.get(key) or {}
+            if node.get("display_name"):
+                parts.append(node["display_name"])
+    return " ".join(parts).casefold()
 
 
 def pick_work(works: list[dict], field: str, tier: str) -> dict | None:
@@ -210,15 +269,85 @@ def run_skill(repo: Path, manuscript: Path, run_dir: Path) -> tuple[int, float, 
     return proc.returncode, elapsed, proc.stdout, proc.stderr
 
 
+def _classify_miss(
+    discovered: bool,
+    full_rank: int | None,
+    best_fit_rank: int | None,
+    bucketed_rank: int | None,
+    matched_best_fit: dict,
+) -> str | None:
+    if bucketed_rank is not None and bucketed_rank <= 10:
+        return None
+    if not discovered:
+        return "not_discovered"
+    if full_rank is None:
+        return "bucket_hidden"
+    rationale = matched_best_fit.get("rationale") or {}
+    article_type_fit = matched_best_fit.get("article_type_fit", rationale.get("article_type_fit"))
+    risk_label = matched_best_fit.get("risk_label", rationale.get("risk_label"))
+    domain_gate = matched_best_fit.get("domain_gate", rationale.get("domain_gate"))
+    ambition_reason = matched_best_fit.get("ambition_reason", rationale.get("ambition_reason")) or ""
+    venue_band = matched_best_fit.get("venue_ambition_band", rationale.get("venue_ambition_band"))
+    if article_type_fit is not None and article_type_fit <= 0.1:
+        return "article_type_demoted"
+    if risk_label == "high" and venue_band in {"elite_general", "top_clinical"}:
+        return "probably_bad_submission_target"
+    if domain_gate in {"conflict", "method_only_match"}:
+        return "domain_demoted"
+    if "exceeds contribution assessment" in ambition_reason or "probably too ambitious" in ambition_reason:
+        return "ambition_demoted"
+    if best_fit_rank is not None and best_fit_rank <= 15:
+        return "bucket_hidden"
+    if full_rank <= 20:
+        return "bucket_hidden"
+    return "ranked_but_low"
+
+
 def summarize_run(run_dir: Path, work: dict, field: str, tier: str, elapsed: float, returncode: int, stderr: str) -> dict:
     ranked_path = run_dir / "ranked_agent_balanced.json"
+    raw_ranked_path = run_dir / "ranked_balanced.json"
     contribution_path = run_dir / "contribution_assessment.json"
     ranked = json.loads(ranked_path.read_text(encoding="utf-8")) if ranked_path.exists() else {}
+    raw_ranked = json.loads(raw_ranked_path.read_text(encoding="utf-8")) if raw_ranked_path.exists() else []
     contribution = json.loads(contribution_path.read_text(encoding="utf-8")) if contribution_path.exists() else {}
     source = _source(work)
     published = source.get("display_name")
-    top = ranked.get("top") or []
-    top_names = [row.get("journal") for row in top[:10]]
+    best_fit = ranked.get("best_fit_ranked") or []
+    if not best_fit and raw_ranked:
+        from sn_lib.venues import VenueHit
+        from sn_lib.ranking import Ranked
+
+        best_fit = [
+            Ranked(VenueHit(**row["venue"]), row["score"], row.get("rationale") or {}).to_summary_dict()
+            for row in raw_ranked[:15]
+        ]
+    bucketed_top = ranked.get("risk_adjusted_recommendations") or ranked.get("top") or []
+    top_names = [row.get("journal") for row in best_fit[:10]]
+    bucketed_names = [row.get("journal") for row in bucketed_top[:10]]
+    best_fit_rank = _rank_of_name(best_fit, published)
+    bucketed_rank = _rank_of_name(bucketed_top, published)
+    full_rank = None
+    if raw_ranked:
+        full_rows = [{"journal": row.get("venue", {}).get("name")} for row in raw_ranked]
+        full_rank = _rank_of_name(full_rows, published)
+    demotion_reason = None
+    matched = {}
+    if bucketed_rank is None or bucketed_rank > 10:
+        matched = next((row for row in best_fit if _normalize_name(row.get("journal")) == _normalize_name(published)), {})
+        if not matched and raw_ranked:
+            raw_match = next((row for row in raw_ranked if _normalize_name(row.get("venue", {}).get("name")) == _normalize_name(published)), {})
+            if raw_match:
+                matched = {
+                    "journal": raw_match.get("venue", {}).get("name"),
+                    "score": raw_match.get("score"),
+                    "rationale": raw_match.get("rationale") or {},
+                    **(raw_match.get("rationale") or {}),
+                }
+        demotion_reason = matched.get("bucket_reason") or matched.get("ambition_reason")
+    discovered = full_rank is not None or best_fit_rank is not None or bucketed_rank is not None
+    miss_reason = _classify_miss(discovered, full_rank, best_fit_rank, bucketed_rank, matched)
+    top5_quality = summarize_rank_quality(best_fit, top_n=5)
+    top10_quality = summarize_rank_quality(best_fit, top_n=10)
     return {
         "field": field,
         "tier_proxy": tier,
@@ -227,8 +356,18 @@ def summarize_run(run_dir: Path, work: dict, field: str, tier: str, elapsed: flo
         "publication_date": work.get("publication_date"),
         "published_venue": published,
         "published_venue_impact_proxy": _impact(work),
-        "published_venue_in_top10": published in top_names,
+        "published_venue_in_top10": best_fit_rank is not None and best_fit_rank <= 10,
+        "published_best_fit_rank": best_fit_rank,
+        "published_full_rank": full_rank,
+        "published_candidate_present": full_rank is not None,
+        "published_bucketed_rank": bucketed_rank,
+        "published_bucketed_in_top10": published in bucketed_names,
+        "published_demotion_reason": demotion_reason,
+        "published_miss_reason": miss_reason,
         "top_recommendations": top_names,
+        "bucketed_recommendations": bucketed_names,
+        "top5_quality": top5_quality,
+        "top10_quality": top10_quality,
         "contribution_tier": contribution.get("contribution_tier"),
         "ambition_band": contribution.get("ambition_band"),
         "bucket_counts": ranked.get("counts"),
@@ -237,6 +376,49 @@ def summarize_run(run_dir: Path, work: dict, field: str, tier: str, elapsed: flo
         "artifact_chars": sum(path.stat().st_size for path in run_dir.glob("*.json") if path.is_file()),
         "returncode": returncode,
         "stderr": stderr[-1000:],
+    }
+
+
+def summarize_results(results: list[dict]) -> dict:
+    ok = [row for row in results if row.get("returncode") == 0]
+    total = len(ok)
+    if not total:
+        return {
+            "cases": len(results),
+            "successful_cases": 0,
+            "best_fit_top10": 0.0,
+            "bucketed_top10": 0.0,
+            "candidate_present": 0.0,
+        }
+
+    def rate(predicate) -> float:
+        return round(sum(1 for row in ok if predicate(row)) / total, 3)
+
+    ranks = [row["published_full_rank"] for row in ok if row.get("published_full_rank") is not None]
+    top5_quality_rows = [row.get("top5_quality") or {} for row in ok]
+    miss_reasons: dict[str, int] = {}
+    for row in ok:
+        reason = row.get("published_miss_reason")
+        if reason:
+            miss_reasons[reason] = miss_reasons.get(reason, 0) + 1
+    return {
+        "cases": len(results),
+        "successful_cases": total,
+        "best_fit_top10": rate(lambda row: row.get("published_best_fit_rank") is not None and row["published_best_fit_rank"] <= 10),
+        "bucketed_top10": rate(lambda row: row.get("published_bucketed_rank") is not None and row["published_bucketed_rank"] <= 10),
+        "candidate_present": rate(lambda row: row.get("published_candidate_present")),
+        "full_rank_top10": rate(lambda row: row.get("published_full_rank") is not None and row["published_full_rank"] <= 10),
+        "full_rank_top20": rate(lambda row: row.get("published_full_rank") is not None and row["published_full_rank"] <= 20),
+        "median_full_rank": sorted(ranks)[len(ranks) // 2] if ranks else None,
+        "top5_scope_caution_rate": round(
+            sum(row.get("rates", {}).get("scope_caution", 0.0) for row in top5_quality_rows) / total,
+            3,
+        ),
+        "top5_contaminated_case_rate": round(
+            sum(bool(row.get("has_contamination")) for row in top5_quality_rows) / total,
+            3,
+        ),
+        "published_miss_reason_counts": miss_reasons,
     }
 
 
@@ -259,6 +441,7 @@ def main() -> int:
 
     def flush_outputs() -> None:
         (out_dir / "results.json").write_text(json.dumps(results, indent=2, ensure_ascii=False), encoding="utf-8")
+        (out_dir / "summary.json").write_text(json.dumps(summarize_results(results), indent=2, ensure_ascii=False), encoding="utf-8")
         (out_dir / "manifest.json").write_text(json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8")
 
     for field in args.fields:

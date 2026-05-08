@@ -23,6 +23,21 @@ GENERIC_PHRASES = {
     "most common",
 }
 
+DOMAIN_PHRASE_RULES = (
+    ("cybersecurity economics", r"\bcybersecurity\s+economics\b|\bsecurity\s+economics\b", 9),
+    ("AI arms race", r"\bai[-\s]+(?:augmented\s+)?(?:arms\s+race|capabilities)\b|\barms\s+race\b.{0,40}\bai\b|\bai\b.{0,40}\barms\s+race\b", 8),
+    ("signal cross-correlation", r"\bsignal\s+cross[-\s]?correlation\b|\bcross[-\s]?correlation\b", 8),
+    ("game theory", r"\bgame[-\s]?theoretic\b|\bgame\s+theory\b", 7),
+    ("adversarial investment", r"\badversarial\s+investment\b|\battacker\b.{0,40}\bdefender\b", 7),
+    ("electrocatalytic urea oxidation", r"\belectrocatalytic\s+urea\s+(?:electro[-\s]?)?oxidation\b", 9),
+    ("urea electro-oxidation", r"\burea\s+electro[-\s]?oxidation\b", 9),
+    ("urea oxidation", r"\burea\b.{0,60}\boxidation\b|\boxidation\b.{0,60}\burea\b", 7),
+    ("nickel-based catalysts", r"\bnickel[-\s]?based\s+catalysts?\b", 9),
+    ("nickel catalysts", r"\bnickel\b.{0,40}\bcatalysts?\b|\bcatalysts?\b.{0,40}\bnickel\b", 6),
+    ("electrocatalysis", r"\belectrocatal(?:ysis|ytic|yst|ysts)\b", 7),
+    ("electrochemical energy conversion", r"\belectrochemical\b.{0,50}\benergy\s+conversion\b", 6),
+)
+
 
 def _normalize_space(text: str) -> str:
     return re.sub(r"\s+", " ", text.strip())
@@ -54,7 +69,12 @@ def _candidate_phrases(text: str, n_values: tuple[int, ...] = (2, 3)) -> list[st
 def derive_concepts(title: str, abstract: str | None, max_concepts: int = 5) -> list[str]:
     title = _normalize_space(title)
     abstract = _normalize_space(abstract or "")
+    combined = _normalize_space(f"{title} {abstract}")
     counts: Counter[str] = Counter()
+
+    for phrase, pattern, weight in DOMAIN_PHRASE_RULES:
+        if re.search(pattern, combined, re.I):
+            counts[phrase] += weight
 
     if title and title.lower() not in GENERIC_PHRASES:
         for chunk in re.split(r"\s*:\s*", title):

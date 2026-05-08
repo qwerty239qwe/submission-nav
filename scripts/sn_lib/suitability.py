@@ -99,8 +99,24 @@ def infer_manuscript_profile(
     domain_terms = {
         "toxicology": ("toxicity", "toxicology", "toxicological", "toxicant", "admet"),
         "cheminformatics": ("cheminformatics", "molecular fingerprint", "qsar", "chemical space", "molecular descriptor"),
+        "chemistry": (
+            "chemistry", "chemical", "catalysis", "catalyst", "catalysts",
+            "electrocatalysis", "electrocatalytic", "electrocatalyst", "electrocatalysts",
+            "electro-oxidation", "electrooxidation", "urea oxidation", "urea electro-oxidation",
+        ),
+        "materials_science": ("materials science", "nickel-based catalyst", "nickel-based catalysts", "nanomaterial", "thin film"),
+        "energy": ("energy conversion", "electrochemical", "fuel cell", "hydrogen production", "urea oxidation"),
+        "computer_science": (
+            "cybersecurity", "cyber security", "information security", "network security",
+            "artificial intelligence", "machine learning", "algorithm", "software",
+        ),
+        "social_science": ("economics", "economic", "public good", "game theory", "contest-theoretic"),
+        "data_science": ("game theory", "modeling", "simulation", "equilibrium"),
         "pharmacology": ("drug discovery", "drug development", "pharmacology", "drug safety"),
-        "bioinformatics": ("bioinformatics", "computational biology", "omics", "genomics"),
+        "bioinformatics": (
+            "bioinformatics", "computational biology", "genomics", "transcriptomics",
+            "proteomics", "metabolomics", "multi-omics", "single-cell omics",
+        ),
         "machine_learning": ("machine learning", "deep learning", "predictive model", "prediction", "classifier"),
         "clinical": ("clinical trial", "patient", "patients", "randomized", "diagnosis", "prognosis"),
     }
@@ -127,6 +143,12 @@ def _domain_scope_fit(profile: ManuscriptProfile, venue: VenueHit, base_fit: flo
         "toxicology": ("toxicology", "toxicological", "toxicity", "environmental health"),
         "cheminformatics": ("cheminformatics", "molecular informatics", "chemical information", "qsar"),
         "pharmacology": ("pharmacology", "drug discovery", "drug safety", "admet"),
+        "chemistry": ("chemistry", "chemical", "catalysis", "catalyst", "electrocatalysis", "electrocatalytic"),
+        "materials_science": ("materials science", "materials chemistry", "nanomaterial", "catalyst"),
+        "energy": ("energy", "energy conversion", "electrochemical", "fuel cell", "hydrogen"),
+        "computer_science": ("computer science", "cybersecurity", "cyber security", "information security", "artificial intelligence", "software"),
+        "social_science": ("economics", "economic", "social sciences", "policy", "business", "management"),
+        "data_science": ("game theory", "statistics", "simulation", "modeling"),
         "bioinformatics": ("bioinformatics", "computational biology", "nucleic acids"),
         "machine_learning": ("machine learning", "artificial intelligence", "deep learning"),
         "clinical": ("clinical", "medicine", "translational"),
@@ -195,6 +217,21 @@ def _venue_kind(venue: VenueHit) -> set[str]:
     text = f"{name} {concepts}"
     kinds: set[str] = set()
     if re.search(r"\b(nature reviews|annual reviews?|annual review|systematic reviews?|reviews? in|journal of reviews?|review of|trends in|current opinion|critical reviews?|review journals?)\b", name):
+        kinds.add("review")
+    chemistry_review_names = {
+        "chemical reviews",
+        "chemical society reviews",
+        "accounts of chemical research",
+    }
+    physics_review_exclusions = (
+        "physical review",
+        "physical review letters",
+        "modern physics",
+        "review letters",
+    )
+    if name in chemistry_review_names:
+        kinds.add("review")
+    elif name.endswith(" reviews") and not name.startswith(physics_review_exclusions):
         kinds.add("review")
     if re.search(r"\b(methods?|protocols?|methodology)\b", name):
         kinds.add("methods")

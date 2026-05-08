@@ -217,6 +217,7 @@ def _collect_venue_files(run_dir: Path) -> list[Path]:
 
 
 def _cmd_rank(args) -> int:
+    from .citation_profile import build_citation_profile_from_references
     from .ranking import rank_venues, summarize_bucketed
     from .venues import VenueHit, _merge_hits
 
@@ -231,7 +232,7 @@ def _cmd_rank(args) -> int:
     ranked_out = run.run_dir / f"ranked_{suffix}.json"
     agent_out = run.run_dir / f"ranked_agent_{suffix}.json"
     bucketed_out = run.run_dir / f"ranked_buckets_{suffix}.json"
-    inputs = [run.concepts, run.ms_summary, run.profile, run.contribution, *venue_files]
+    inputs = [run.concepts, run.ms_summary, run.ms_full, run.profile, run.contribution, *venue_files]
     if not outputs_fresh(inputs, [ranked_out, agent_out, bucketed_out], args.force):
         loaded_venues = []
         for path in venue_files:
@@ -239,6 +240,11 @@ def _cmd_rank(args) -> int:
                 loaded_venues.append(VenueHit(**row))
         venues = _merge_hits([], loaded_venues)
         summary = _read_json(run.ms_summary)
+        ms_full = _read_json(run.ms_full) if run.ms_full.exists() else {}
+        citation_profile = None
+        if isinstance(ms_full, dict):
+            citation_profile_obj = build_citation_profile_from_references(ms_full.get("references") or [])
+            citation_profile = citation_profile_obj.to_dict() if citation_profile_obj else None
         ranked = rank_venues(
             concepts,
             venues,
@@ -248,6 +254,7 @@ def _cmd_rank(args) -> int:
             ms_title=summary.get("title"),
             ms_abstract=summary.get("abstract"),
             contribution_assessment=_read_json(run.contribution),
+            citation_profile=citation_profile,
         )
         _write(ranked_out, [item.to_dict() for item in ranked])
         bucketed = summarize_bucketed(ranked, strategy=args.strategy, top_n=args.agent_top_n)

@@ -33,7 +33,7 @@ def _clinical_validation(text: str) -> str:
 
 def _data_type(text: str) -> str:
     patterns = (
-        ("omics", ("multi-omics", "omics", "genomics", "transcriptomics", "rna-seq", "sequencing")),
+        ("omics", ("multi-omics", "genomics", "transcriptomics", "proteomics", "metabolomics", "rna-seq", "sequencing")),
         ("clinical_records", ("electronic health record", "ehr", "clinical records")),
         ("molecular", ("molecular descriptor", "fingerprint", "compound", "chemical")),
         ("imaging", ("image", "imaging", "radiology", "microscopy")),
@@ -65,10 +65,12 @@ def build_profile(
     headings = manuscript_summary.get("section_headings") or []
     text = _norm(" ".join([title, abstract, " ".join(concepts), " ".join(headings)]))
     base = infer_manuscript_profile(concepts, title=title, abstract=abstract, oa_preference=oa_preference)
+    contribution_type = manuscript_summary.get("article_type") or base.contribution_type
     software_resource = _has_any(text, ("software", "application", "web server", "desktop application", "package", "toolkit"))
     dataset_resource = _has_any(text, ("dataset", "database", "data resource", "benchmark dataset"))
     return {
         **base.to_dict(),
+        "contribution_type": contribution_type,
         "data_type": _data_type(text),
         "method_novelty": _method_novelty(text),
         "clinical_validation": _clinical_validation(text),

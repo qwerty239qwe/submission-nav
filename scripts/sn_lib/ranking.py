@@ -1,8 +1,10 @@
 from __future__ import annotations
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, replace
 from rapidfuzz import fuzz
+from .citation_profile import score_citation_relatedness
 from .cli import emit_json
 from .contribution import ambition_alignment, ambition_cap, classify_venue_ambition
+from .domain_gate import apply_domain_gate, assess_domain_compatibility
 from .suitability import infer_manuscript_profile, score_suitability
 from .venues import VenueHit
 
@@ -42,6 +44,10 @@ class Ranked:
             "venue_ambition_band": self.rationale.get("venue_ambition_band"),
             "contribution_tier": self.rationale.get("contribution_tier"),
             "ambition_reason": self.rationale.get("ambition_reason"),
+            "domain_gate": self.rationale.get("domain_gate"),
+            "domain_gate_reasons": self.rationale.get("domain_gate_reasons", []),
+            "citation_relatedness": self.rationale.get("citation_relatedness"),
+            "citation_reasons": self.rationale.get("citation_reasons", []),
             "rationale": self.rationale,
         }
 
@@ -97,6 +103,31 @@ def _apc_penalty(apc: float | None, budget: float | None) -> float:
         return 0.0
     return min(0.5, (apc - budget) / max(budget, 1.0) * 0.25)
 
+
+def _ambition_cap_escape(
+    ambition_reason: str,
+    venue_band: str,
+    fit: float,
+    scope_fit: float,
+    article_type_fit: float,
+    domain_label: str,
+    manuscript_domains: list[str],
+    citation_score: float,
+) -> bool:
+    if "chemistry" not in manuscript_domains:
+        return True
+    if venue_band in {"fallback", "safe_specialty", "broad_megajournal"}:
+        return True
+    if venue_band == "specialty_target" and fit >= 0.45 and citation_score >= 0.18:
+        return True
+    if "exceeds contribution assessment" not in ambition_reason and "probably too ambitious" not in ambition_reason:
+        return True
+    if domain_label in {"conflict", "method_only_match"}:
+        return False
+    if article_type_fit < 0.45:
+        return False
+    return max(fit, scope_fit) >= 0.55 and citation_score >= 0.25
+
 def rank_venues(
     ms_concepts: list[str],
     venues: list[VenueHit],
@@ -106,6 +137,7 @@ def rank_venues(
     ms_title: str | None = None,
     ms_abstract: str | None = None,
     contribution_assessment: dict | None = None,
+    citation_profile: dict | None = None,
     w_fit: float = 0.6,
     w_impact: float = 0.3,
     w_oa: float = 0.1,
@@ -117,6 +149,10 @@ def rank_venues(
         abstract=ms_abstract,
         oa_preference=oa_preference,
     )
+    assessed_profile = ((contribution_assessment or {}).get("evidence") or {}).get("profile") or {}
+    assessed_type = assessed_profile.get("contribution_type")
+    if assessed_type:
+        profile = replace(profile, contribution_type=assessed_type)
     for v in venues:
         concept_fit = _fit(ms_concepts, v.concepts)
         text_fit = _text_fit(ms_concepts, v)
@@ -140,8 +176,30 @@ def rank_venues(
         )
         venue_band = classify_venue_ambition(v)
         ambition_delta, contribution_tier, ambition_reason = ambition_alignment(contribution_assessment, venue_band)
-        score = ambition_cap(contribution_assessment, venue_band, suitability.strategy_score + ambition_delta)
+        ambition_adjusted_score = suitability.strategy_score + ambition_delta
+        ambition_capped_score = ambition_cap(contribution_assessment, venue_band, ambition_adjusted_score)
+        core_fit_score = suitability.strategy_score
+        domain_gate = assess_domain_compatibility(ms_concepts, ms_title, ms_abstract, profile, v)
+        citation = score_citation_relatedness(citation_profile, v)
+        citation_score = float(citation.get("score") or 0.0)
+        domain_gate_payload = domain_gate.to_dict()
         suitability_payload = suitability.to_dict()
+        cap_escaped = _ambition_cap_escape(
+            ambition_reason,
+            venue_band,
+            fit,
+            suitability_payload["scope_fit"],
+            suitability_payload["article_type_fit"],
+            domain_gate_payload["label"],
+            domain_gate_payload["manuscript_domains"],
+            citation_score,
+        )
+        ranking_input_score = core_fit_score if cap_escaped else ambition_capped_score
+        pre_citation_score = apply_domain_gate(ranking_input_score, domain_gate)
+        citation_bonus = 0.12 * citation_score
+        if domain_gate.label in {"conflict", "method_only_match"} and citation_score < 0.18:
+            citation_bonus = 0.0
+        score = min(1.0, pre_citation_score + citation_bonus)
         out.append(Ranked(v, round(score, 4), {
             "strategy": strategy,
             "fit": round(fit, 3),
@@ -157,6 +215,15 @@ def rank_venues(
             "raw_score": round(raw_score, 4),
             "suitability_score": suitability_payload["score"],
             "strategy_score": suitability_payload["strategy_score"],
+            "core_fit_score": round(core_fit_score, 4),
+            "ambition_adjusted_score": round(ambition_adjusted_score, 4),
+            "ambition_capped_score": round(ambition_capped_score, 4),
+            "ambition_cap_escaped": cap_escaped,
+            "pre_domain_gate_score": round(ranking_input_score, 4),
+            "pre_citation_score": round(pre_citation_score, 4),
+            "citation_relatedness": round(citation_score, 4),
+            "citation_bonus": round(citation_bonus, 4),
+            "citation_reasons": citation.get("reasons", []),
             "scope_fit": suitability_payload["scope_fit"],
             "article_type_fit": suitability_payload["article_type_fit"],
             "cost_fit": suitability_payload["cost_fit"],
@@ -170,6 +237,13 @@ def rank_venues(
             "contribution_tier": contribution_tier,
             "ambition_delta": round(ambition_delta, 3),
             "ambition_reason": ambition_reason,
+            "domain_gate": domain_gate_payload["label"],
+            "domain_gate_score_cap": domain_gate_payload["score_cap"],
+            "domain_gate_penalty": domain_gate_payload["penalty"],
+            "domain_gate_reasons": domain_gate_payload["reasons"],
+            "manuscript_domains": domain_gate_payload["manuscript_domains"],
+            "venue_domains": domain_gate_payload["venue_domains"],
+            "method_domains": domain_gate_payload["method_domains"],
             "manuscript_profile": suitability_payload["profile"],
         }))
     out.sort(key=lambda r: r.score, reverse=True)
@@ -190,6 +264,52 @@ def summarize_ranked(
     return [r.to_summary_dict(concept_limit=concept_limit) for r in items]
 
 
+def _high_confidence_fit(item: Ranked) -> bool:
+    rationale = item.rationale
+    if rationale.get("domain_gate") in {"conflict", "method_only_match"}:
+        return False
+    if (rationale.get("article_type_fit") or 0.0) < 0.7:
+        return False
+    return (
+        item.score >= 0.52
+        or (rationale.get("fit") or 0.0) >= 0.55
+        or (rationale.get("scope_fit") or 0.0) >= 0.55
+        or (rationale.get("citation_relatedness") or 0.0) >= 0.28
+    )
+
+
+def _hard_excluded_from_visible_top(item: Ranked, bucket: str, strategy: str) -> bool:
+    rationale = item.rationale
+    if bucket == "avoid":
+        return True
+    if rationale.get("publisher_risk_label") in {"potential_predatory_match", "hijacked_or_identity_risk"}:
+        return True
+    if rationale.get("domain_gate") in {"conflict", "method_only_match"}:
+        return True
+    if (rationale.get("article_type_fit") or 1.0) <= 0.1:
+        return True
+    if rationale.get("risk_label") == "high":
+        return True
+    return False
+
+
+def _visible_carryover_candidate(item: Ranked, bucket: str, strategy: str) -> bool:
+    if _hard_excluded_from_visible_top(item, bucket, strategy):
+        return False
+    rationale = item.rationale
+    if strategy != "broad" and rationale.get("venue_ambition_band") == "broad_megajournal":
+        return False
+    if (rationale.get("article_type_fit") or 1.0) < 0.45:
+        return False
+    return (
+        _high_confidence_fit(item)
+        or item.score >= 0.50
+        or (rationale.get("fit") or 0.0) >= 0.50
+        or (rationale.get("scope_fit") or 0.0) >= 0.50
+        or (rationale.get("citation_relatedness") or 0.0) >= 0.25
+    )
+
+
 def _bucket_for(item: Ranked) -> tuple[str, str]:
     rationale = item.rationale
     risk = rationale.get("risk_label")
@@ -198,6 +318,7 @@ def _bucket_for(item: Ranked) -> tuple[str, str]:
     publisher_label = rationale.get("publisher_risk_label")
     venue_band = rationale.get("venue_ambition_band")
     ambition_reason = rationale.get("ambition_reason") or ""
+    domain_gate = rationale.get("domain_gate")
     impact = _impact(item.venue.impact_proxy)
     if publisher_label in {"potential_predatory_match", "hijacked_or_identity_risk"}:
         return "avoid", "publisher integrity risk"
@@ -207,13 +328,18 @@ def _bucket_for(item: Ranked) -> tuple[str, str]:
         return "avoid", "high risk"
     if article_type_fit < 0.7 or any("outside the manuscript" in reason for reason in reasons):
         return "fallback", "scope or article-type caution"
+    if domain_gate in {"conflict", "method_only_match"}:
+        return "fallback", "domain-community caution"
+    if domain_gate == "adjacent" and item.score < 0.50:
+        return "fallback", "adjacent-domain low-confidence venue"
     if venue_band == "broad_megajournal":
-        if item.score >= 0.45:
-            return "safe", "broad fallback venue"
-        return "fallback", "broad low-confidence venue"
+        return "fallback", "broad fallback venue"
+    ambition_caution = "exceeds contribution assessment" in ambition_reason or "probably too ambitious" in ambition_reason
+    if ambition_caution and _high_confidence_fit(item):
+        return "stretch", "ambitious but high-confidence topical fit"
     if "exceeds contribution assessment" in ambition_reason and venue_band in {"elite_general", "top_clinical"}:
-        return "avoid", "ambition mismatch"
-    if "exceeds contribution assessment" in ambition_reason or "probably too ambitious" in ambition_reason:
+        return "fallback", "ambition mismatch; keep only as stretch discussion"
+    if ambition_caution:
         return "fallback", "ambition caution"
     if item.score >= 0.43 and impact >= 0.30:
         return "stretch", "higher-impact plausible venue"
@@ -242,25 +368,86 @@ def summarize_bucketed(
     }.get(strategy, ["target", "stretch", "safe", "fallback", "avoid"])
     buckets: dict[str, list[dict]] = {name: [] for name in ["stretch", "target", "safe", "fallback", "avoid"]}
     counts: dict[str, int] = {name: 0 for name in buckets}
+    bucketed_items: list[tuple[Ranked, str, str, dict]] = []
     for item in ranked:
         bucket, reason = _bucket_for(item)
         counts[bucket] += 1
         row = item.to_summary_dict(concept_limit=concept_limit)
         row["bucket"] = bucket
         row["bucket_reason"] = reason
+        bucketed_items.append((item, bucket, reason, row))
         if len(buckets[bucket]) < per_bucket:
             buckets[bucket].append(row)
     ordered_top: list[dict] = []
+    seen: set[str] = set()
+    selected_bucket_counts: dict[str, int] = {name: 0 for name in buckets}
+
+    def add_row(row: dict) -> bool:
+        journal = row.get("journal")
+        if len(ordered_top) >= top_n or journal in seen:
+            return False
+        ordered_top.append(row)
+        seen.add(journal)
+        selected_bucket_counts[row.get("bucket")] = selected_bucket_counts.get(row.get("bucket"), 0) + 1
+        return True
+
+    def strong_overflow_candidate(item: Ranked) -> bool:
+        rationale = item.rationale
+        return (
+            (rationale.get("citation_relatedness") or 0.0) >= 0.28
+            or ((rationale.get("article_type_fit") or 1.0) < 0.7 and _high_confidence_fit(item))
+        )
+
     for bucket in bucket_order:
-        for row in buckets[bucket]:
+        primary_added = 0
+        for item, item_bucket, _reason, row in bucketed_items:
+            if item_bucket != bucket:
+                continue
             if len(ordered_top) >= top_n:
                 break
-            ordered_top.append(row)
+            if primary_added >= per_bucket:
+                break
+            if _hard_excluded_from_visible_top(item, item_bucket, strategy):
+                continue
+            if add_row(row):
+                primary_added += 1
         if len(ordered_top) >= top_n:
             break
+    carryover_pool = bucketed_items[: max(top_n, 15)]
+    rescue_limit = min(10, top_n)
+    for item, bucket, _reason, row in carryover_pool:
+        journal = row.get("journal")
+        if journal in seen or not _visible_carryover_candidate(item, bucket, strategy):
+            continue
+        if strategy != "broad" and row.get("venue_ambition_band") == "broad_megajournal":
+            continue
+        if selected_bucket_counts.get(bucket, 0) >= per_bucket and not strong_overflow_candidate(item):
+            continue
+        if len(ordered_top) < rescue_limit:
+            add_row(row)
+            continue
+        weakest_idx = min(range(rescue_limit), key=lambda idx: ordered_top[idx].get("score") or 0.0)
+        weakest = ordered_top[weakest_idx]
+        if (row.get("score") or 0.0) <= (weakest.get("score") or 0.0):
+            continue
+        removed = ordered_top[weakest_idx].get("journal")
+        removed_bucket = ordered_top[weakest_idx].get("bucket")
+        ordered_top[weakest_idx] = row
+        seen.discard(removed)
+        seen.add(journal)
+        selected_bucket_counts[removed_bucket] = max(0, selected_bucket_counts.get(removed_bucket, 0) - 1)
+        selected_bucket_counts[bucket] = selected_bucket_counts.get(bucket, 0) + 1
+    for item, bucket, _reason, row in bucketed_items:
+        if len(ordered_top) >= top_n:
+            break
+        if _hard_excluded_from_visible_top(item, bucket, strategy):
+            continue
+        add_row(row)
     return {
         "strategy": strategy,
         "bucket_order": bucket_order,
+        "best_fit_ranked": summarize_ranked(ranked, top_n=top_n, concept_limit=concept_limit),
+        "risk_adjusted_recommendations": ordered_top,
         "top": ordered_top,
         "buckets": buckets,
         "counts": counts,
