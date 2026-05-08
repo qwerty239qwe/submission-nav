@@ -1,10 +1,27 @@
 from sn_lib.venues import VenueHit
-from sn_lib.ranking import rank_venues, summarize_bucketed, summarize_ranked
+from sn_lib.ranking import Ranked, rank_venues, summarize_bucketed, summarize_ranked
 
 def _v(name, concepts, impact, oa=False, apc=None, publisher=None, source="openalex"):
     return VenueHit(id=name, name=name, issn=None, publisher=publisher,
                     is_oa=oa, apc_usd=apc, impact_proxy=impact,
                     h_index=None, concepts=concepts, source=source)
+
+
+def _ranked(name: str, score: float, **rationale) -> Ranked:
+    base = {
+        "fit": rationale.pop("fit", score),
+        "scope_fit": rationale.pop("scope_fit", score),
+        "article_type_fit": rationale.pop("article_type_fit", 1.0),
+        "risk_label": rationale.pop("risk_label", "low"),
+        "risk_reasons": rationale.pop("risk_reasons", []),
+        "publisher_risk_label": rationale.pop("publisher_risk_label", "trusted"),
+        "domain_gate": rationale.pop("domain_gate", "compatible"),
+        "venue_ambition_band": rationale.pop("venue_ambition_band", "safe_specialty"),
+        "ambition_reason": rationale.pop("ambition_reason", "venue ambition is acceptable"),
+        "citation_relatedness": rationale.pop("citation_relatedness", 0.0),
+    }
+    base.update(rationale)
+    return Ranked(_v(name, ["topic"], 1.0, publisher="Known Publisher", source="openalex+scopus"), score, base)
 
 def test_fit_dominates_when_equal_impact():
     ms_concepts = ["widget optimization", "gradient methods"]
@@ -76,6 +93,48 @@ def test_summarize_bucketed_keeps_broad_megajournal_as_safe_fallback():
     summary = summarize_bucketed(ranked, strategy="balanced", top_n=5)
     broad_rows = [row for rows in summary["buckets"].values() for row in rows if row["journal"] == "Scientific Reports"]
     assert broad_rows[0]["bucket"] == "fallback"
+
+
+def test_summarize_bucketed_can_surface_broad_megajournal_when_slots_remain():
+    broad = _ranked("Scientific Reports", 0.48, venue_ambition_band="broad_megajournal", publisher_risk_label="trusted")
+    target = _ranked("BMC Medical Genomics", 0.55)
+    summary = summarize_bucketed([target, broad], strategy="balanced", top_n=5)
+    assert [row["journal"] for row in summary["top"]] == ["BMC Medical Genomics", "Scientific Reports"]
+    assert summary["top"][1]["bucket"] == "fallback"
+
+
+def test_summarize_bucketed_carries_high_confidence_hidden_rows():
+    ranked = [
+        *[_ranked(f"Target {i}", 0.70 - i * 0.01) for i in range(6)],
+        *[_ranked(f"Stretch {i}", 0.64 - i * 0.01, venue_ambition_band="selective_specialty", ambition_reason="venue ambition band selective_specialty is probably too ambitious") for i in range(4)],
+        _ranked("Hidden Good Fit", 0.66, article_type_fit=0.55, citation_relatedness=0.3),
+    ]
+    summary = summarize_bucketed(ranked, strategy="balanced", top_n=10, per_bucket=5)
+    journals = [row["journal"] for row in summary["top"]]
+    assert "Hidden Good Fit" in journals
+
+
+def test_summarize_bucketed_primary_pass_respects_per_bucket():
+    ranked = [
+        *[_ranked(f"Target {i}", 0.70 - i * 0.01) for i in range(6)],
+        *[_ranked(f"Stretch {i}", 0.50 - i * 0.01, venue_ambition_band="selective_specialty", ambition_reason="venue ambition band selective_specialty is probably too ambitious") for i in range(3)],
+    ]
+    summary = summarize_bucketed(ranked, strategy="balanced", top_n=6, per_bucket=3)
+    journals = [row["journal"] for row in summary["top"]]
+    assert journals[:3] == ["Target 0", "Target 1", "Target 2"]
+    assert "Stretch 0" in journals
+
+
+def test_summarize_bucketed_does_not_carry_hard_exclusions():
+    ranked = [
+        *[_ranked(f"Target {i}", 0.70 - i * 0.01) for i in range(5)],
+        _ranked("Domain Conflict", 0.62, domain_gate="conflict", citation_relatedness=0.4),
+        _ranked("Review Mismatch", 0.61, article_type_fit=0.05, risk_label="high", risk_reasons=["review-only/review-focused venue for a non-review manuscript"]),
+    ]
+    summary = summarize_bucketed(ranked, strategy="balanced", top_n=10, per_bucket=5)
+    journals = [row["journal"] for row in summary["top"]]
+    assert "Domain Conflict" not in journals
+    assert "Review Mismatch" not in journals
 
 
 def test_broad_journal_prestige_does_not_beat_scope_by_default():
@@ -242,7 +301,7 @@ def test_citation_profile_adds_auditable_relatedness_signal():
     assert target_row.rationale["citation_bonus"] > 0
 
 
-def test_low_evidence_ambition_cap_affects_core_rank_score():
+def test_non_chemistry_ambition_cap_is_advisory_not_core_rank_score():
     elite = _v("The Lancet", ["clinical medicine", "patient outcomes"], 20.0)
     specialty = _v("Safe Specialty Journal", ["clinical medicine", "patient outcomes"], 1.0)
     contribution = {
@@ -257,6 +316,27 @@ def test_low_evidence_ambition_cap_affects_core_rank_score():
         contribution_assessment=contribution,
     )
     elite_row = next(item for item in ranked if item.venue.name == "The Lancet")
+    assert elite_row.rationale["ambition_capped_score"] < elite_row.rationale["core_fit_score"]
+    assert elite_row.rationale["ambition_cap_escaped"] is True
+    assert elite_row.rationale["pre_domain_gate_score"] == elite_row.rationale["core_fit_score"]
+
+
+def test_low_evidence_chemistry_ambition_cap_affects_core_rank_score():
+    elite = _v("Nature Communications", ["chemistry", "catalysis", "molecular synthesis"], 5.0)
+    specialty = _v("Safe Chemistry Journal", ["chemistry", "catalysis"], 1.0)
+    contribution = {
+        "contribution_tier": "exploratory",
+        "avoid_bands": ["high_impact_specialty"],
+        "recommended_bands": ["safe_specialty"],
+    }
+    ranked = rank_venues(
+        ["chemistry", "catalysis", "molecular synthesis"],
+        [elite, specialty],
+        ms_title="Catalytic synthesis of organic molecules",
+        ms_abstract="We report chemical synthesis and catalysis.",
+        contribution_assessment=contribution,
+    )
+    elite_row = next(item for item in ranked if item.venue.name == "Nature Communications")
     assert elite_row.rationale["ambition_capped_score"] < elite_row.rationale["core_fit_score"]
     assert elite_row.rationale["ambition_cap_escaped"] is False
     assert elite_row.rationale["pre_domain_gate_score"] == elite_row.rationale["ambition_capped_score"]
@@ -329,6 +409,21 @@ def test_chemistry_review_venue_demoted_for_original_research():
     review_row = next(item for item in ranked if item.venue.name == "Chemical Society Reviews")
     assert review_row.rationale["article_type_fit"] <= 0.1
     assert review_row.rationale["risk_label"] == "high"
+
+
+def test_contribution_profile_can_mark_review_manuscript_for_ranking():
+    review = _v("Chemical Society Reviews", ["chemistry", "catalysis"], 10.0)
+    target = _v("Helvetica Chimica Acta", ["chemistry", "organic synthesis"], 0.5)
+    ranked = rank_venues(
+        ["organic synthesis", "chemistry"],
+        [review, target],
+        ms_title="Catalytic synthesis of organic molecules",
+        ms_abstract="We summarize chemical synthesis and catalysis.",
+        contribution_assessment={"evidence": {"profile": {"contribution_type": "review"}}},
+    )
+    review_row = next(item for item in ranked if item.venue.name == "Chemical Society Reviews")
+    assert review_row.rationale["article_type_fit"] == 1.0
+    assert review_row.rationale["risk_label"] != "high"
 
 
 def test_bucketed_keeps_high_confidence_ambitious_matches_visible():

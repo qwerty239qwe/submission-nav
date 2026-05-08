@@ -11,18 +11,22 @@ METHOD_DOMAINS = {"computer_science", "data_science", "statistics"}
 DOMAIN_TERMS = {
     "biomedical": (
         "biomedical", "medicine", "medical", "clinical", "patient", "patients", "disease",
-        "diagnosis", "prognosis", "genomics", "omics", "bioinformatics", "biology",
+        "diagnosis", "prognosis", "genomics", "transcriptomics", "proteomics",
+        "metabolomics", "multi-omics", "bioinformatics", "biology",
         "molecular biology", "health sciences", "healthcare", "health informatics",
         "cancer", "cardiology", "neurology", "hematology",
     ),
     "chemistry": (
         "chemistry", "chemical", "molecule", "synthesis", "catalysis",
-        "compound", "organic", "inorganic", "cheminformatics", "toxicology", "drug",
-        "pharmacology",
+        "catalyst", "catalysts", "electrocatalysis", "electrocatalytic",
+        "electrocatalyst", "electrocatalysts", "electro-oxidation", "electrooxidation",
+        "urea oxidation", "urea electro-oxidation", "compound", "organic", "inorganic",
+        "cheminformatics", "toxicology", "drug", "pharmacology",
     ),
     "materials": (
         "materials", "materials science", "polymer", "nanomaterial", "alloy", "thin film",
-        "semiconductor", "crystal", "ceramic", "mxene",
+        "semiconductor", "crystal", "ceramic", "mxene", "nickel-based catalyst",
+        "nickel-based catalysts",
     ),
     "physics": (
         "physics", "quantum", "particle", "condensed matter", "optics", "optical",
@@ -31,6 +35,7 @@ DOMAIN_TERMS = {
     "engineering": (
         "engineering", "mechanical", "electrical", "civil", "manufacturing", "robotics",
         "construction", "control systems", "fluid", "energy conversion",
+        "electrochemical energy conversion", "hydrogen production",
     ),
     "environmental": (
         "environment", "environmental", "ecology", "climate", "biodiversity", "ecosystem",
@@ -43,11 +48,12 @@ DOMAIN_TERMS = {
     "computer_science": (
         "computer science", "artificial intelligence", "machine learning", "deep learning",
         "algorithm", "software", "network", "database", "information systems",
-        "computational linguistics", "computer vision",
+        "computational linguistics", "computer vision", "cybersecurity", "cyber security",
+        "information security", "network security",
     ),
     "data_science": (
         "statistics", "statistical", "data science", "bayesian", "regression",
-        "prediction", "predictive", "modeling", "simulation",
+        "prediction", "predictive", "modeling", "simulation", "game theory",
     ),
 }
 
@@ -166,7 +172,9 @@ def _has_chemistry_primary_signal(venue: VenueHit) -> bool:
         return False
     chemistry_terms = (
         "chemistry", "chemical", "chimica", "catalysis", "synthesis", "organic",
-        "inorganic", "molecule", "cheminformatics", "acs ",
+        "inorganic", "molecule", "cheminformatics", "catalyst", "catalysts",
+        "electrocatalysis", "electrocatalytic", "electrocatalyst", "electrocatalysts",
+        "electro-oxidation", "electrooxidation", "urea oxidation", "acs ",
         "jacs",
     )
     if any(term in name for term in (*chemistry_terms, "molecular informatics")):

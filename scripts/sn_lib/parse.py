@@ -19,6 +19,7 @@ class Manuscript:
     reference_count: int
     source_path: str
     references: list[str] = field(default_factory=list)
+    article_type: str | None = None
 
     def to_dict(self) -> dict:
         return {**asdict(self), "sections": [asdict(s) for s in self.sections]}
@@ -33,6 +34,7 @@ class Manuscript:
             "word_count": self.word_count,
             "reference_count": self.reference_count,
             "source_path": self.source_path,
+            "article_type": self.article_type,
         }
 
 HEADING_NUMBER_RE = re.compile(r"^\s*\d+(?:\.\d+)*\.?\s*")
@@ -42,15 +44,22 @@ OPENALEX_WORK_RE = re.compile(r"(?:https?://openalex\.org/)?W\d+", re.I)
 DOI_RE = re.compile(r"\b10\.\d{4,9}/[^\s;,]+", re.I)
 GENERIC_PDF_LABELS = {
     "research article",
+    "review article",
     "article",
     "article in press",
     "open access",
+    "view article online",
+    "view journal",
     "body",
     "methodology",
     "reviewed preprint",
     "not revised",
 }
-JOURNAL_LINE_RE = re.compile(r"^(plos|bmc|elife|peerj|scientific reports|journal of|nature|frontiers|cell|the lancet)\b", re.I)
+JOURNAL_LINE_RE = re.compile(
+    r"^(plos|bmc|elife|peerj|scientific reports|journal of|nature|frontiers|cell|the lancet|"
+    r"chemcomm|chem\.?\s*commun\.?|chemical communications|royal society of chemistry)\b",
+    re.I,
+)
 AUTHOR_LINE_RE = re.compile(
     r"(?:\b[a-z]+,\s*){1,}[a-z]+|\bet al\.?\b|\borcid\b|@|affiliat|department|university|institute|\bgoecksj@|roles\b",
     re.I,
@@ -58,7 +67,8 @@ AUTHOR_LINE_RE = re.compile(
 TITLE_STOP_RE = re.compile(r"^(abstract|introduction|background|results|methods|references)\b", re.I)
 PDF_METADATA_RE = re.compile(
     r"^(type|published|doi|received|accepted|submitted|edited by|reviewed by|correspondence|for correspondence|"
-    r"competing interests|funding|reviewing editor|cite this article|from the)\b|@|https?://",
+    r"competing interests|funding|reviewing editor|cite this article|from the|view article online|view journal|"
+    r"creative commons|open access article|arxiv:)\b|^cite this:|@|https?://",
     re.I,
 )
 KNOWN_HEADINGS = (
@@ -165,6 +175,17 @@ def _clean_pdf_line(text: str) -> str:
     return re.sub(r"\s+", " ", text.replace("\u00ad", "").strip())
 
 
+def _infer_article_type(lines: list[str]) -> str | None:
+    text = " ".join(_clean_pdf_line(line).casefold() for line in lines[:40])
+    if "review article" in text or "this review" in text:
+        return "review"
+    if "systematic review" in text or "meta-analysis" in text:
+        return "review"
+    if "research article" in text or "original research" in text:
+        return "original_research"
+    return None
+
+
 def _is_generic_pdf_label(text: str) -> bool:
     t = _clean_pdf_line(text).lower()
     if not t:
@@ -240,7 +261,7 @@ def _pick_pdf_title_from_layout(rows: list[tuple[float, float, str]]) -> str:
         clean = _clean_pdf_line(text)
         if not clean:
             continue
-        if y > 360 or size < 15:
+        if y > 360 or size < 13:
             continue
         if _is_generic_pdf_label(clean) or PDF_METADATA_RE.search(clean):
             continue
@@ -253,10 +274,88 @@ def _pick_pdf_title_from_layout(rows: list[tuple[float, float, str]]) -> str:
     largest = max(size for _, size, _ in candidates)
     title_rows = [(y, size, text) for y, size, text in candidates if size >= largest - 2.5]
     title_rows.sort(key=lambda row: row[0])
+    if title_rows:
+        last_y = max(y for y, _, _ in title_rows)
+        for y, size, text in sorted(candidates, key=lambda row: row[0]):
+            if y <= last_y or y - last_y > 35:
+                continue
+            if size < largest - 7.5:
+                continue
+            if len(text.split()) < 4:
+                continue
+            title_rows.append((y, size, text))
+            last_y = y
     title = _clean_pdf_line(" ".join(text for _, _, text in title_rows))
     if len(title.split()) >= 3:
         return title
     return ""
+
+
+def _extract_pdf_abstract_from_first_page(lines: list[str], title: str) -> str | None:
+    cleaned = [_clean_pdf_line(line) for line in lines if _clean_pdf_line(line)]
+    if not cleaned:
+        return None
+    title_tokens = set(re.findall(r"[a-z0-9]+", title.casefold()))
+    passed_title = False
+    passed_authors = False
+    out: list[str] = []
+    for line in cleaned:
+        lower = line.casefold()
+        line_tokens = set(re.findall(r"[a-z0-9]+", lower))
+        if not passed_title:
+            if title_tokens and len(title_tokens & line_tokens) >= min(4, len(title_tokens)):
+                passed_title = True
+            continue
+        if TITLE_STOP_RE.match(line):
+            break
+        if _is_generic_pdf_label(line) or PDF_METADATA_RE.search(line):
+            continue
+        if not passed_authors:
+            if _looks_like_author_line(line):
+                passed_authors = True
+            continue
+        if _looks_like_author_line(line):
+            continue
+        out.append(line)
+        if len(" ".join(out).split()) >= 80:
+            break
+    abstract = _clean_abstract_text(" ".join(out).strip())
+    return abstract if abstract and len(abstract.split()) >= 25 else None
+
+
+def _extract_pdf_abstract_from_layout(rows: list[tuple[float, float, str]], title: str) -> str | None:
+    title_tokens = set(re.findall(r"[a-z0-9]+", title.casefold()))
+    title_bottom = 0.0
+    for y, size, text in rows:
+        if y > 260 or size < 12:
+            continue
+        clean = _clean_pdf_line(text)
+        line_tokens = set(re.findall(r"[a-z0-9]+", clean.casefold()))
+        if title_tokens and len(title_tokens & line_tokens) >= min(4, len(title_tokens)):
+            title_bottom = max(title_bottom, y)
+    if not title_bottom:
+        return None
+
+    out: list[str] = []
+    for y, size, text in sorted(rows, key=lambda row: row[0]):
+        clean = _clean_pdf_line(text)
+        if y <= title_bottom + 18 or y > 520:
+            continue
+        if not clean or size > 11:
+            continue
+        if TITLE_STOP_RE.match(clean):
+            break
+        if _is_generic_pdf_label(clean) or PDF_METADATA_RE.search(clean) or "rsc.li/" in clean.casefold():
+            continue
+        if y < title_bottom + 45 and AUTHOR_LINE_RE.search(clean):
+            continue
+        if re.match(r"^[*a-z\d,\s]+$", clean, re.I) and len(clean.split()) <= 5:
+            continue
+        out.append(clean)
+        if len(" ".join(out).split()) >= 120:
+            break
+    abstract = _clean_abstract_text(" ".join(out).strip())
+    return abstract if abstract and len(abstract.split()) >= 25 else None
 
 def _looks_like_title(style: str, text: str) -> bool:
     t = text.strip()
@@ -320,7 +419,8 @@ def _parse_docx(path: Path) -> Manuscript:
     references = _extract_references(refs_section.text if refs_section else None)
     all_text = " ".join(s.text for s in sections)
     wc = len(all_text.split())
-    return Manuscript(title.strip(), authors, abstract, sections, wc, ref_count, str(path), references=references)
+    article_type = _infer_article_type([style for style, _ in paras] + [text for _, text in paras[:20]])
+    return Manuscript(title.strip(), authors, abstract, sections, wc, ref_count, str(path), references=references, article_type=article_type)
 
 def _parse_pdf(path: Path) -> Manuscript:
     import fitz
@@ -333,8 +433,8 @@ def _parse_pdf(path: Path) -> Manuscript:
     lines = [l for l in full.splitlines() if l.strip()]
     first_page_lines = [l for l in pages[0].splitlines() if l.strip()] if pages else lines
     title, authors = _pick_pdf_title_and_authors(first_page_lines)
+    layout_rows: list[tuple[float, float, str]] = []
     if pages:
-        layout_rows: list[tuple[float, float, str]] = []
         for block in doc[0].get_text("dict").get("blocks", []):
             for line in block.get("lines", []):
                 text = " ".join(span.get("text", "").strip() for span in line.get("spans", []) if span.get("text", "").strip())
@@ -346,9 +446,15 @@ def _parse_pdf(path: Path) -> Manuscript:
         layout_title = _pick_pdf_title_from_layout(layout_rows)
         if layout_title:
             title = layout_title
-    if not authors and len(lines) > 1:
-        authors_line = lines[1]
-        authors = [a.strip() for a in re.split(r",| and ", authors_line) if a.strip() and len(a.strip()) < 60]
+    if not authors:
+        for authors_line in first_page_lines[1:12]:
+            if _is_generic_pdf_label(authors_line) or PDF_METADATA_RE.search(authors_line):
+                continue
+            if not _looks_like_author_line(authors_line):
+                continue
+            authors = [a.strip() for a in re.split(r",| and ", authors_line) if a.strip() and len(a.strip()) < 60]
+            if authors:
+                break
     blocks: list[tuple[str, str]] = []
     cur_head = "Body"
     cur_buf: list[str] = []
@@ -365,11 +471,16 @@ def _parse_pdf(path: Path) -> Manuscript:
     sections = [Section(h, t) for h, t in blocks]
     abstract = next((s.text for s in sections if _is_abstract_heading(s.heading)), None)
     abstract = _clean_abstract_text(abstract)
+    if not abstract and layout_rows:
+        abstract = _extract_pdf_abstract_from_layout(layout_rows, title)
+    if not abstract:
+        abstract = _extract_pdf_abstract_from_first_page(first_page_lines, title)
     refs_section = next((s for s in sections if _is_reference_heading(s.heading)), None)
     ref_count = _count_references(refs_section.text) if refs_section else 0
     references = _extract_references(refs_section.text if refs_section else None)
     wc = len(full.split())
-    return Manuscript(title.strip(), authors, abstract, sections, wc, ref_count, str(path), references=references)
+    article_type = _infer_article_type(first_page_lines)
+    return Manuscript(title.strip(), authors, abstract, sections, wc, ref_count, str(path), references=references, article_type=article_type)
 
 def parse_manuscript(path: str | Path) -> Manuscript:
     p = Path(path)

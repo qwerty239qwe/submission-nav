@@ -116,8 +116,51 @@ def test_summarize_run_reports_best_fit_and_bucketed_ranks(tmp_path):
     assert result["published_best_fit_rank"] == 1
     assert result["published_candidate_present"] is False
     assert result["published_bucketed_rank"] is None
+    assert result["published_miss_reason"] == "bucket_hidden"
     assert result["top_recommendations"] == ["Expected Journal", "Other Journal"]
     assert result["bucketed_recommendations"] == ["Other Journal"]
+
+
+def test_summarize_run_uses_raw_ranked_rationale_for_miss_reason(tmp_path):
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    (run_dir / "ranked_agent_balanced.json").write_text(json.dumps({
+        "best_fit_ranked": [],
+        "risk_adjusted_recommendations": [],
+        "counts": {},
+    }), encoding="utf-8")
+    venue = {
+        "id": "expected",
+        "name": "Expected Journal",
+        "issn": None,
+        "publisher": "Known Publisher",
+        "is_oa": False,
+        "apc_usd": None,
+        "impact_proxy": 1.0,
+        "h_index": None,
+        "concepts": ["psychology"],
+        "source": "openalex",
+    }
+    (run_dir / "ranked_balanced.json").write_text(json.dumps([
+        {
+            "venue": venue,
+            "score": 0.4,
+            "rationale": {
+                "fit": 0.5,
+                "domain_gate": "conflict",
+                "article_type_fit": 1.0,
+                "risk_label": "low",
+            },
+        }
+    ]), encoding="utf-8")
+    (run_dir / "contribution_assessment.json").write_text("{}", encoding="utf-8")
+    work = {
+        "title": "Example",
+        "primary_location": {"source": {"display_name": "Expected Journal"}},
+    }
+    result = summarize_run(run_dir, work, "social_sciences", "middle", 1.0, 0, "")
+    assert result["published_full_rank"] == 1
+    assert result["published_miss_reason"] == "domain_demoted"
 
 
 def test_summarize_results_reports_separate_primary_metrics():
@@ -128,6 +171,7 @@ def test_summarize_results_reports_separate_primary_metrics():
             "published_bucketed_rank": None,
             "published_full_rank": 3,
             "published_candidate_present": True,
+            "published_miss_reason": "bucket_hidden",
             "top5_quality": {"rates": {"scope_caution": 0.2}, "has_contamination": True},
         },
         {
@@ -136,6 +180,7 @@ def test_summarize_results_reports_separate_primary_metrics():
             "published_bucketed_rank": 8,
             "published_full_rank": 18,
             "published_candidate_present": True,
+            "published_miss_reason": None,
             "top5_quality": {"rates": {"scope_caution": 0.0}, "has_contamination": False},
         },
     ])
@@ -144,3 +189,13 @@ def test_summarize_results_reports_separate_primary_metrics():
     assert summary["candidate_present"] == 1.0
     assert summary["full_rank_top20"] == 1.0
     assert summary["top5_contaminated_case_rate"] == 0.5
+    assert summary["published_miss_reason_counts"] == {"bucket_hidden": 1}
+
+
+def test_summarize_results_counts_miss_reasons():
+    summary = summarize_results([
+        {"returncode": 0, "published_full_rank": None, "published_candidate_present": False, "published_miss_reason": "not_discovered", "top5_quality": {"rates": {}, "has_contamination": False}},
+        {"returncode": 0, "published_full_rank": 22, "published_candidate_present": True, "published_miss_reason": "ranked_but_low", "top5_quality": {"rates": {}, "has_contamination": False}},
+        {"returncode": 0, "published_full_rank": 8, "published_candidate_present": True, "published_bucketed_rank": 4, "published_miss_reason": None, "top5_quality": {"rates": {}, "has_contamination": False}},
+    ])
+    assert summary["published_miss_reason_counts"] == {"not_discovered": 1, "ranked_but_low": 1}

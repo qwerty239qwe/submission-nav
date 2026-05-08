@@ -110,3 +110,33 @@ def test_domain_gate_treats_physics_venue_as_chemistry_adjacent_without_primary_
 
     assert gate.label == "adjacent"
     assert gate.score_cap == 0.58
+
+
+def test_domain_gate_treats_electrocatalysis_venue_as_primary_chemistry():
+    concepts = ["urea electro-oxidation", "nickel-based catalysts", "electrocatalysis"]
+    profile = infer_manuscript_profile(
+        concepts,
+        title="Urea electro-oxidation on nickel-based catalysts",
+        abstract="We study electrocatalytic urea oxidation and hydrogen production.",
+    )
+    gate = assess_domain_compatibility(
+        concepts,
+        "Urea electro-oxidation on nickel-based catalysts",
+        "We study electrocatalytic urea oxidation and hydrogen production.",
+        profile,
+        _venue("Journal of Electrocatalysis", ["electrocatalysis", "catalysts"]),
+    )
+
+    assert gate.label == "compatible"
+
+
+def test_profile_does_not_treat_economics_as_omics():
+    profile = infer_manuscript_profile(
+        ["cybersecurity economics", "game theory"],
+        title="Cybersecurity economics and game theory",
+        abstract="We model attacker and defender investment incentives in an AI arms race.",
+    )
+
+    assert "bioinformatics" not in profile.domains
+    assert "computer_science" in profile.domains
+    assert "social_science" in profile.domains

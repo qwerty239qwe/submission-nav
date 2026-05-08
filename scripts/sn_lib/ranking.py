@@ -1,5 +1,5 @@
 from __future__ import annotations
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, replace
 from rapidfuzz import fuzz
 from .citation_profile import score_citation_relatedness
 from .cli import emit_json
@@ -111,8 +111,11 @@ def _ambition_cap_escape(
     scope_fit: float,
     article_type_fit: float,
     domain_label: str,
+    manuscript_domains: list[str],
     citation_score: float,
 ) -> bool:
+    if "chemistry" not in manuscript_domains:
+        return True
     if venue_band in {"fallback", "safe_specialty", "broad_megajournal"}:
         return True
     if venue_band == "specialty_target" and fit >= 0.45 and citation_score >= 0.18:
@@ -146,6 +149,10 @@ def rank_venues(
         abstract=ms_abstract,
         oa_preference=oa_preference,
     )
+    assessed_profile = ((contribution_assessment or {}).get("evidence") or {}).get("profile") or {}
+    assessed_type = assessed_profile.get("contribution_type")
+    if assessed_type:
+        profile = replace(profile, contribution_type=assessed_type)
     for v in venues:
         concept_fit = _fit(ms_concepts, v.concepts)
         text_fit = _text_fit(ms_concepts, v)
@@ -184,6 +191,7 @@ def rank_venues(
             suitability_payload["scope_fit"],
             suitability_payload["article_type_fit"],
             domain_gate_payload["label"],
+            domain_gate_payload["manuscript_domains"],
             citation_score,
         )
         ranking_input_score = core_fit_score if cap_escaped else ambition_capped_score
@@ -270,6 +278,38 @@ def _high_confidence_fit(item: Ranked) -> bool:
     )
 
 
+def _hard_excluded_from_visible_top(item: Ranked, bucket: str, strategy: str) -> bool:
+    rationale = item.rationale
+    if bucket == "avoid":
+        return True
+    if rationale.get("publisher_risk_label") in {"potential_predatory_match", "hijacked_or_identity_risk"}:
+        return True
+    if rationale.get("domain_gate") in {"conflict", "method_only_match"}:
+        return True
+    if (rationale.get("article_type_fit") or 1.0) <= 0.1:
+        return True
+    if rationale.get("risk_label") == "high":
+        return True
+    return False
+
+
+def _visible_carryover_candidate(item: Ranked, bucket: str, strategy: str) -> bool:
+    if _hard_excluded_from_visible_top(item, bucket, strategy):
+        return False
+    rationale = item.rationale
+    if strategy != "broad" and rationale.get("venue_ambition_band") == "broad_megajournal":
+        return False
+    if (rationale.get("article_type_fit") or 1.0) < 0.45:
+        return False
+    return (
+        _high_confidence_fit(item)
+        or item.score >= 0.50
+        or (rationale.get("fit") or 0.0) >= 0.50
+        or (rationale.get("scope_fit") or 0.0) >= 0.50
+        or (rationale.get("citation_relatedness") or 0.0) >= 0.25
+    )
+
+
 def _bucket_for(item: Ranked) -> tuple[str, str]:
     rationale = item.rationale
     risk = rationale.get("risk_label")
@@ -328,22 +368,81 @@ def summarize_bucketed(
     }.get(strategy, ["target", "stretch", "safe", "fallback", "avoid"])
     buckets: dict[str, list[dict]] = {name: [] for name in ["stretch", "target", "safe", "fallback", "avoid"]}
     counts: dict[str, int] = {name: 0 for name in buckets}
+    bucketed_items: list[tuple[Ranked, str, str, dict]] = []
     for item in ranked:
         bucket, reason = _bucket_for(item)
         counts[bucket] += 1
         row = item.to_summary_dict(concept_limit=concept_limit)
         row["bucket"] = bucket
         row["bucket_reason"] = reason
+        bucketed_items.append((item, bucket, reason, row))
         if len(buckets[bucket]) < per_bucket:
             buckets[bucket].append(row)
     ordered_top: list[dict] = []
+    seen: set[str] = set()
+    selected_bucket_counts: dict[str, int] = {name: 0 for name in buckets}
+
+    def add_row(row: dict) -> bool:
+        journal = row.get("journal")
+        if len(ordered_top) >= top_n or journal in seen:
+            return False
+        ordered_top.append(row)
+        seen.add(journal)
+        selected_bucket_counts[row.get("bucket")] = selected_bucket_counts.get(row.get("bucket"), 0) + 1
+        return True
+
+    def strong_overflow_candidate(item: Ranked) -> bool:
+        rationale = item.rationale
+        return (
+            (rationale.get("citation_relatedness") or 0.0) >= 0.28
+            or ((rationale.get("article_type_fit") or 1.0) < 0.7 and _high_confidence_fit(item))
+        )
+
     for bucket in bucket_order:
-        for row in buckets[bucket]:
+        primary_added = 0
+        for item, item_bucket, _reason, row in bucketed_items:
+            if item_bucket != bucket:
+                continue
             if len(ordered_top) >= top_n:
                 break
-            ordered_top.append(row)
+            if primary_added >= per_bucket:
+                break
+            if _hard_excluded_from_visible_top(item, item_bucket, strategy):
+                continue
+            if add_row(row):
+                primary_added += 1
         if len(ordered_top) >= top_n:
             break
+    carryover_pool = bucketed_items[: max(top_n, 15)]
+    rescue_limit = min(10, top_n)
+    for item, bucket, _reason, row in carryover_pool:
+        journal = row.get("journal")
+        if journal in seen or not _visible_carryover_candidate(item, bucket, strategy):
+            continue
+        if strategy != "broad" and row.get("venue_ambition_band") == "broad_megajournal":
+            continue
+        if selected_bucket_counts.get(bucket, 0) >= per_bucket and not strong_overflow_candidate(item):
+            continue
+        if len(ordered_top) < rescue_limit:
+            add_row(row)
+            continue
+        weakest_idx = min(range(rescue_limit), key=lambda idx: ordered_top[idx].get("score") or 0.0)
+        weakest = ordered_top[weakest_idx]
+        if (row.get("score") or 0.0) <= (weakest.get("score") or 0.0):
+            continue
+        removed = ordered_top[weakest_idx].get("journal")
+        removed_bucket = ordered_top[weakest_idx].get("bucket")
+        ordered_top[weakest_idx] = row
+        seen.discard(removed)
+        seen.add(journal)
+        selected_bucket_counts[removed_bucket] = max(0, selected_bucket_counts.get(removed_bucket, 0) - 1)
+        selected_bucket_counts[bucket] = selected_bucket_counts.get(bucket, 0) + 1
+    for item, bucket, _reason, row in bucketed_items:
+        if len(ordered_top) >= top_n:
+            break
+        if _hard_excluded_from_visible_top(item, bucket, strategy):
+            continue
+        add_row(row)
     return {
         "strategy": strategy,
         "bucket_order": bucket_order,

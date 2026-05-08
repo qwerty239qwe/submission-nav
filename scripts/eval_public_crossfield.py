@@ -269,6 +269,40 @@ def run_skill(repo: Path, manuscript: Path, run_dir: Path) -> tuple[int, float, 
     return proc.returncode, elapsed, proc.stdout, proc.stderr
 
 
+def _classify_miss(
+    discovered: bool,
+    full_rank: int | None,
+    best_fit_rank: int | None,
+    bucketed_rank: int | None,
+    matched_best_fit: dict,
+) -> str | None:
+    if bucketed_rank is not None and bucketed_rank <= 10:
+        return None
+    if not discovered:
+        return "not_discovered"
+    if full_rank is None:
+        return "bucket_hidden"
+    rationale = matched_best_fit.get("rationale") or {}
+    article_type_fit = matched_best_fit.get("article_type_fit", rationale.get("article_type_fit"))
+    risk_label = matched_best_fit.get("risk_label", rationale.get("risk_label"))
+    domain_gate = matched_best_fit.get("domain_gate", rationale.get("domain_gate"))
+    ambition_reason = matched_best_fit.get("ambition_reason", rationale.get("ambition_reason")) or ""
+    venue_band = matched_best_fit.get("venue_ambition_band", rationale.get("venue_ambition_band"))
+    if article_type_fit is not None and article_type_fit <= 0.1:
+        return "article_type_demoted"
+    if risk_label == "high" and venue_band in {"elite_general", "top_clinical"}:
+        return "probably_bad_submission_target"
+    if domain_gate in {"conflict", "method_only_match"}:
+        return "domain_demoted"
+    if "exceeds contribution assessment" in ambition_reason or "probably too ambitious" in ambition_reason:
+        return "ambition_demoted"
+    if best_fit_rank is not None and best_fit_rank <= 15:
+        return "bucket_hidden"
+    if full_rank <= 20:
+        return "bucket_hidden"
+    return "ranked_but_low"
+
+
 def summarize_run(run_dir: Path, work: dict, field: str, tier: str, elapsed: float, returncode: int, stderr: str) -> dict:
     ranked_path = run_dir / "ranked_agent_balanced.json"
     raw_ranked_path = run_dir / "ranked_balanced.json"
@@ -297,9 +331,21 @@ def summarize_run(run_dir: Path, work: dict, field: str, tier: str, elapsed: flo
         full_rows = [{"journal": row.get("venue", {}).get("name")} for row in raw_ranked]
         full_rank = _rank_of_name(full_rows, published)
     demotion_reason = None
-    if best_fit_rank is not None and bucketed_rank is None:
+    matched = {}
+    if bucketed_rank is None or bucketed_rank > 10:
         matched = next((row for row in best_fit if _normalize_name(row.get("journal")) == _normalize_name(published)), {})
+        if not matched and raw_ranked:
+            raw_match = next((row for row in raw_ranked if _normalize_name(row.get("venue", {}).get("name")) == _normalize_name(published)), {})
+            if raw_match:
+                matched = {
+                    "journal": raw_match.get("venue", {}).get("name"),
+                    "score": raw_match.get("score"),
+                    "rationale": raw_match.get("rationale") or {},
+                    **(raw_match.get("rationale") or {}),
+                }
         demotion_reason = matched.get("bucket_reason") or matched.get("ambition_reason")
+    discovered = full_rank is not None or best_fit_rank is not None or bucketed_rank is not None
+    miss_reason = _classify_miss(discovered, full_rank, best_fit_rank, bucketed_rank, matched)
     top5_quality = summarize_rank_quality(best_fit, top_n=5)
     top10_quality = summarize_rank_quality(best_fit, top_n=10)
     return {
@@ -317,6 +363,7 @@ def summarize_run(run_dir: Path, work: dict, field: str, tier: str, elapsed: flo
         "published_bucketed_rank": bucketed_rank,
         "published_bucketed_in_top10": published in bucketed_names,
         "published_demotion_reason": demotion_reason,
+        "published_miss_reason": miss_reason,
         "top_recommendations": top_names,
         "bucketed_recommendations": bucketed_names,
         "top5_quality": top5_quality,
@@ -349,6 +396,11 @@ def summarize_results(results: list[dict]) -> dict:
 
     ranks = [row["published_full_rank"] for row in ok if row.get("published_full_rank") is not None]
     top5_quality_rows = [row.get("top5_quality") or {} for row in ok]
+    miss_reasons: dict[str, int] = {}
+    for row in ok:
+        reason = row.get("published_miss_reason")
+        if reason:
+            miss_reasons[reason] = miss_reasons.get(reason, 0) + 1
     return {
         "cases": len(results),
         "successful_cases": total,
@@ -366,6 +418,7 @@ def summarize_results(results: list[dict]) -> dict:
             sum(bool(row.get("has_contamination")) for row in top5_quality_rows) / total,
             3,
         ),
+        "published_miss_reason_counts": miss_reasons,
     }
 
 

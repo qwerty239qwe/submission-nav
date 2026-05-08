@@ -1,6 +1,13 @@
 from pathlib import Path
 from docx import Document
-from sn_lib.parse import parse_manuscript, Manuscript, _pick_pdf_title_and_authors, _pick_pdf_title_from_layout
+from sn_lib.parse import (
+    parse_manuscript,
+    Manuscript,
+    _extract_pdf_abstract_from_layout,
+    _infer_article_type,
+    _pick_pdf_title_and_authors,
+    _pick_pdf_title_from_layout,
+)
 
 def _make_docx(path: Path):
     d = Document()
@@ -101,6 +108,66 @@ def test_pick_pdf_title_from_layout_skips_journal_and_article_labels():
         "Protium heptaphyllum, a tree native to the Atlantic Forest, is a potential source "
         "of compounds against important cocoa phytopathogen"
     )
+
+
+def test_pick_pdf_title_from_layout_skips_target_journal_header():
+    rows = [
+        (52.3, 20.9, "ChemComm"),
+        (94.2, 9.0, "View Article Online"),
+        (95.2, 15.9, "REVIEW ARTICLE"),
+        (106.4, 6.0, "View Journal"),
+        (136.0, 15.9, "Revealing the reaction pathways and interfacial"),
+        (153.9, 15.9, "regulation mechanisms of urea electro-oxidation"),
+        (171.8, 15.9, "on nickel-based catalysts"),
+        (172.8, 8.0, "Open Access Article. Published on 29 April 2026. Downloaded on 5/7/2026 3:16:12 AM."),
+    ]
+    assert _pick_pdf_title_from_layout(rows) == (
+        "Revealing the reaction pathways and interfacial regulation mechanisms of urea electro-oxidation "
+        "on nickel-based catalysts"
+    )
+
+
+def test_pick_pdf_title_from_layout_includes_arxiv_subtitle_not_sidebar():
+    rows = [
+        (116.1, 20.7, "The Adversarial Discount"),
+        (139.0, 14.3, "AI, Signal Correlation, and the Cybersecurity Arms Race"),
+        (174.5, 14.3, "James Bono"),
+        (202.4, 14.3, "May 7, 2026"),
+        (213.2, 20.0, "arXiv:2605.04336v1  [econ.TH]  5 May 2026"),
+        (248.6, 10.9, "Abstract"),
+    ]
+    assert _pick_pdf_title_from_layout(rows) == (
+        "The Adversarial Discount AI, Signal Correlation, and the Cybersecurity Arms Race"
+    )
+
+
+def test_extract_pdf_abstract_from_layout_skips_target_journal_metadata():
+    title = (
+        "Revealing the reaction pathways and interfacial regulation mechanisms of urea electro-oxidation "
+        "on nickel-based catalysts"
+    )
+    rows = [
+        (52.3, 20.9, "ChemComm"),
+        (136.0, 15.9, "Revealing the reaction pathways and interfacial"),
+        (153.9, 15.9, "regulation mechanisms of urea electro-oxidation"),
+        (171.8, 15.9, "on nickel-based catalysts"),
+        (195.9, 10.0, "Riyi Zhang, ab Yong Yan,* ab Zhihao Yi"),
+        (225.8, 8.0, "With an equilibrium potential of 0.37 V versus RHE, much lower than that of the oxygen evolution"),
+        (237.8, 8.0, "reaction, the electrocatalytic urea oxidation reaction has been widely regarded as a promising anodic"),
+        (249.7, 8.0, "half reaction for reducing the energy consumption of hydrogen production while treating nitrogen"),
+        (261.7, 8.0, "containing wastewater. Its practical application, however, is still limited by sluggish kinetics arising from"),
+        (273.6, 8.0, "the complex six electron, six proton transfer process, even in high performance nickel based catalysts."),
+        (430.1, 7.2, "Received 25th March 2026,"),
+    ]
+    abstract = _extract_pdf_abstract_from_layout(rows, title)
+    assert abstract is not None
+    assert abstract.startswith("With an equilibrium potential")
+    assert "ChemComm" not in abstract
+    assert "Received 25th March" not in abstract
+
+
+def test_infer_article_type_from_review_article_front_matter():
+    assert _infer_article_type(["ChemComm", "REVIEW ARTICLE", "Title"]) == "review"
 
 
 def test_pick_pdf_title_from_layout_handles_interleaved_sidebar_metadata():

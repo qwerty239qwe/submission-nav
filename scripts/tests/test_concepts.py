@@ -31,3 +31,23 @@ def test_derive_from_summary_tries_specific_title_query_before_abstract_terms():
         "abstract": "Ancestral value estimation uses phylogenetic tree posterior distribution methods.",
     })
     assert payload["queries"][0] == "Bayesian inference of mixed Gaussian phylogenetic models"
+
+
+def test_derive_concepts_preserves_electrocatalysis_phrases():
+    concepts = derive_concepts(
+        "Revealing the reaction pathways and interfacial regulation mechanisms of urea electro-oxidation on nickel-based catalysts",
+        "This review summarizes electrocatalytic urea oxidation, nickel catalysts, hydrogen production, and electrochemical energy conversion.",
+    )
+    assert "urea electro-oxidation" in concepts
+    assert "nickel-based catalysts" in concepts
+    assert any("electrocatal" in concept for concept in concepts)
+
+
+def test_derive_concepts_preserves_cybersecurity_economics_phrases():
+    concepts = derive_concepts(
+        "The Adversarial Discount AI, Signal Correlation, and the Cybersecurity Arms Race",
+        "Keywords: cybersecurity economics, AI arms race, adversarial discount, signal correlation, platform security, game theory.",
+    )
+    assert "cybersecurity economics" in concepts
+    assert "AI arms race" in concepts
+    assert "game theory" in concepts
